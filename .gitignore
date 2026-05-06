@@ -1,2 +1,6 @@
 venv
 backend/test_data
+.DS_Store
+__pycache__
+backend/logs
+__init__.py
