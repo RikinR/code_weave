@@ -1,37 +1,83 @@
 from __future__ import annotations
 
 from tree_sitter import Node
+
 from infrastructure.file.reader import read_file
-from infrastructure.parser.tree_sitter_parser import get_parser, PYTHON_QUERIES, get_query
 from infrastructure.logging.logger import get_logger
+from infrastructure.parser.language_specs import get_language_spec
+from infrastructure.parser.path_language import infer_language
+from infrastructure.parser.tree_sitter_parser import build_query_map, get_parser
 
 logger = get_logger(__name__)
+
+_IDENTIFIER_TYPES = frozenset(
+    {
+        "identifier",
+        "field_identifier",
+        "type_identifier",
+        "property_identifier",
+        "simple_identifier",
+    }
+)
 
 
 def _text_slice(code: bytes, start: int, end: int) -> str:
     return code[start:end].decode("utf-8", errors="replace")
 
 
+def _name_from_declarator(decl: Node | None) -> Node | None:
+    if decl is None:
+        return None
+    if decl.type in _IDENTIFIER_TYPES:
+        return decl
+    nested = decl.child_by_field_name("declarator")
+    if nested is not None:
+        got = _name_from_declarator(nested)
+        if got is not None:
+            return got
+    for child in decl.children:
+        if child.type in _IDENTIFIER_TYPES:
+            return child
+    return None
+
+
 def _function_name(code: bytes, fn_node: Node) -> str | None:
     name_node = fn_node.child_by_field_name("name")
-    if name_node is None:
-        return None
-    return _text_slice(code, name_node.start_byte, name_node.end_byte)
+    if name_node is not None:
+        return _text_slice(code, name_node.start_byte, name_node.end_byte)
+    sel_node = fn_node.child_by_field_name("selector")
+    if sel_node is not None:
+        return _text_slice(code, sel_node.start_byte, sel_node.end_byte)
+    decl = fn_node.child_by_field_name("declarator")
+    id_node = _name_from_declarator(decl)
+    if id_node is not None:
+        return _text_slice(code, id_node.start_byte, id_node.end_byte)
+    return None
 
 
-def _chunk_byte_span(fn_node: Node) -> tuple[int, int]:
-    parent = fn_node.parent
-    if parent is not None and parent.type == "decorated_definition":
-        return parent.start_byte, parent.end_byte
-    return fn_node.start_byte, fn_node.end_byte
+def _chunk_byte_span(fn_node: Node, wrapper_types: frozenset[str]) -> tuple[int, int]:
+    cur = fn_node
+    start, end = cur.start_byte, cur.end_byte
+    parent = cur.parent
+    while parent is not None and parent.type in wrapper_types:
+        start, end = parent.start_byte, parent.end_byte
+        cur = parent
+        parent = cur.parent
+    return start, end
 
 
-def extract_functions(code: bytes, root: Node, query) -> list[dict]:
+def extract_functions(
+    code: bytes,
+    root: Node,
+    query,
+    function_node_types: frozenset[str],
+    wrapper_types: frozenset[str],
+) -> list[dict]:
     result: list[dict] = []
     seen: set[int] = set()
 
     for node, cap in query.captures(root):
-        if cap != "fn_def" or node.type != "function_definition":
+        if cap != "fn_def" or node.type not in function_node_types:
             continue
 
         key = node.start_byte
@@ -41,10 +87,14 @@ def extract_functions(code: bytes, root: Node, query) -> list[dict]:
 
         name = _function_name(code, node)
         if not name:
-            logger.debug("skip function_definition without name at byte %s", node.start_byte)
+            logger.debug(
+                "skip %s without resolvable name at byte %s",
+                node.type,
+                node.start_byte,
+            )
             continue
 
-        start, end = _chunk_byte_span(node)
+        start, end = _chunk_byte_span(node, wrapper_types)
         chunk_code = _text_slice(code, start, end)
 
         logger.debug(
@@ -69,66 +119,96 @@ def extract_functions(code: bytes, root: Node, query) -> list[dict]:
     return result
 
 
-def extract_structure(code,root,queries):
-    result = {
-        "class": None,
-        "methods": [],
-        "attributes": []}
+def extract_structure(code: bytes, root: Node, queries: dict) -> dict:
+    result: dict = {"class": None, "methods": [], "attributes": []}
 
-    for node, cap in queries["class_methods"].captures(root):
+    class_methods = queries["class_methods"]
+    for node, cap in class_methods.captures(root):
         if cap == "class_name":
-            result["class"] = code[node.start_byte:node.end_byte].decode()
-            logger.debug(f"class name extracted : {code[node.start_byte:node.end_byte].decode()}")
-
+            result["class"] = _text_slice(code, node.start_byte, node.end_byte)
+            logger.debug("class name extracted: %s", result["class"])
         elif cap == "method_name":
-            result["methods"].append(
-                code[node.start_byte:node.end_byte].decode()
+            result["methods"].append(_text_slice(code, node.start_byte, node.end_byte))
+            logger.debug(
+                "method name extracted: %s",
+                _text_slice(code, node.start_byte, node.end_byte),
             )
-            logger.debug(f"method name extracted : {code[node.start_byte:node.end_byte].decode()}")
 
-    for node, cap in queries["attributes"].captures(root):
+    attrs_q = queries["attributes"]
+    for node, cap in attrs_q.captures(root):
         if cap == "attr_name":
             result["attributes"].append(
-                code[node.start_byte:node.end_byte].decode()
+                _text_slice(code, node.start_byte, node.end_byte)
             )
-            logger.debug(f"attributes name extracted : {code[node.start_byte:node.end_byte].decode()}")
+            logger.debug(
+                "attribute name extracted: %s",
+                _text_slice(code, node.start_byte, node.end_byte),
+            )
 
     return result
 
 
-def process_file(file_path: str, lang: str = "python"):
-    logger.debug(f"calling file reader")
+def process_file(file_path: str, lang: str | None = None) -> dict:
+    logger.info("process_file: start path=%s lang=%s", file_path, lang or "(infer)")
+    if lang is None:
+        lang = infer_language(file_path)
+
+    spec = get_language_spec(lang)
     raw_code = read_file(file_path)
     if isinstance(raw_code, str):
         code = raw_code.encode("utf-8")
     else:
         code = raw_code
 
-    logger.debug(f"calling parser")
     parser = get_parser(lang)
-
-    logger.debug(f"calling parse function")
     tree = parser.parse(code)
-    
-    if tree is None:
-        raise ValueError("Parser returned None: Check if language is supported.")
-        
-    root = tree.root_node
 
-    queries = {
-        "functions": get_query(lang=lang,queries=PYTHON_QUERIES["functions"]),
-        "class_methods": get_query(lang=lang,queries=PYTHON_QUERIES["class_methods"]),
-        "attributes": get_query(lang=lang,queries=PYTHON_QUERIES["attributes"])
-    }
-    logger.debug(f"getting chunks ")
-    chunks = extract_functions(code, root, queries["functions"])
-    logger.debug(f"getting structure")
+    if tree is None:
+        logger.error(
+            "process_file: parser returned None for path=%s language=%s",
+            file_path,
+            lang,
+        )
+        raise ValueError("Parser returned None: Check if language is supported.")
+
+    root = tree.root_node
+    queries = build_query_map(lang)
+
+    chunks = extract_functions(
+        code,
+        root,
+        queries["functions"],
+        spec.function_node_types,
+        spec.wrapper_types,
+    )
     structure = extract_structure(code, root, queries)
 
-    logger.debug(f"final output: \n file: {file_path},chunks: {chunks},structure: {structure}")
+    if not chunks:
+        logger.warning(
+            "process_file: no function chunks extracted path=%s language=%s",
+            file_path,
+            lang,
+        )
+
+    logger.debug(
+        "final output: file=%s lang=%s chunks=%s structure=%s",
+        file_path,
+        lang,
+        chunks,
+        structure,
+    )
+
+    logger.info(
+        "process_file: done path=%s language=%s chunks=%d class=%r",
+        file_path,
+        lang,
+        len(chunks),
+        structure.get("class"),
+    )
 
     return {
         "file": file_path,
+        "language": lang,
         "chunks": chunks,
-        "structure": structure
+        "structure": structure,
     }

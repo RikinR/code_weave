@@ -4,3 +4,4 @@ backend/test_data
 __pycache__
 backend/logs
 __init__.py
+backend/.env

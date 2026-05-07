@@ -33,6 +33,7 @@ LOGGING_CONFIG = {
         "application": {"level": "DEBUG", "propagate": True},
         "infrastructure": {"level": "DEBUG", "propagate": True},
         "app": {"level": "DEBUG", "propagate": True},
+        "sqlalchemy.engine": {"level": "WARNING", "propagate": True},
     },
     "root": {
         "handlers": ["console", "file"],
