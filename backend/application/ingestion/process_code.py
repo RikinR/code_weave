@@ -1,7 +1,7 @@
 from __future__ import annotations
-
 from tree_sitter import Node
-
+from application.ingestion.call_extraction import extract_calls
+from application.ingestion.line_numbers import byte_offset_to_line
 from infrastructure.file.reader import read_file
 from infrastructure.logging.logger import get_logger
 from infrastructure.parser.language_specs import get_language_spec
@@ -96,14 +96,15 @@ def extract_functions(
 
         start, end = _chunk_byte_span(node, wrapper_types)
         chunk_code = _text_slice(code, start, end)
+        def_start, def_end = node.start_byte, node.end_byte
 
         logger.debug(
             "function %r chunk %s-%s definition %s-%s",
             name,
             start,
             end,
-            node.start_byte,
-            node.end_byte,
+            def_start,
+            def_end,
         )
 
         result.append(
@@ -112,6 +113,10 @@ def extract_functions(
                 "code": chunk_code,
                 "start": start,
                 "end": end,
+                "definition_start": def_start,
+                "definition_end": def_end,
+                "start_line": byte_offset_to_line(code, start),
+                "end_line": byte_offset_to_line(code, end),
             }
         )
 
@@ -182,6 +187,7 @@ def process_file(file_path: str, lang: str | None = None) -> dict:
         spec.wrapper_types,
     )
     structure = extract_structure(code, root, queries)
+    calls = extract_calls(code, root, lang)
 
     if not chunks:
         logger.warning(
@@ -211,4 +217,5 @@ def process_file(file_path: str, lang: str | None = None) -> dict:
         "language": lang,
         "chunks": chunks,
         "structure": structure,
+        "calls": calls,
     }

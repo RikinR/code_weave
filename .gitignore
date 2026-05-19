@@ -3,5 +3,6 @@ backend/test_data
 .DS_Store
 __pycache__
 backend/logs
+backend/data/
 __init__.py
 backend/.env

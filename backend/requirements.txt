@@ -20,6 +20,8 @@ pycparser==3.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+faiss-cpu>=1.8.0
+sentence-transformers>=3.0.0
 six==1.17.0
 sounddevice==0.5.5
 SQLAlchemy==2.0.49

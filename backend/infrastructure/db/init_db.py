@@ -2,6 +2,7 @@ from infrastructure.db.base import Base
 from infrastructure.db.session import engine
 from infrastructure.db.models.repository_model import RepositoryModel
 from infrastructure.db.models.file_model import FileModel
+from infrastructure.db.models.class_model import ClassModel
 from infrastructure.db.models.chunk_model import ChunkModel
 from infrastructure.db.models.function_model import FunctionModel
 from infrastructure.db.models.function_calls_model import FunctionCallModel

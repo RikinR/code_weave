@@ -1,7 +1,7 @@
 from pathlib import Path
 from application.ingestion.process_code import process_file
+from application.ingestion.source_filter import iter_source_files
 from infrastructure.logging.logger import get_logger
-from infrastructure.parser.path_language import is_supported_extension
 
 logger = get_logger(__name__)
 
@@ -12,13 +12,7 @@ def process_folder(folder: Path) -> list[dict]:
         logger.warning("folder does not exist or is not a directory: %s", folder)
         return result
 
-    for file in sorted(folder.rglob("*")):
-        if not file.is_file():
-            continue
-        if not is_supported_extension(file):
-            logger.debug("skip (unsupported extension): %s", file)
-            continue
-
+    for file in iter_source_files(folder):
         path = str(file)
         logger.debug("parse %s (language inferred from extension)", path)
         try:
