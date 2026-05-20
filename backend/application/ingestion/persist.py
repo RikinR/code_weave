@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID
 from sqlalchemy.orm import Session
 from application.ingestion.chunk_text import chunk_to_embedding_text
+from application.ingestion.path_utils import relative_to_repo, resolve_repo_path
 from infrastructure.db.models.chunk_model import ChunkModel
 from infrastructure.db.models.class_model import ClassModel
 from infrastructure.db.models.file_model import FileModel
@@ -15,9 +16,9 @@ from infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _file_hash(file_path: str) -> str:
+def _file_hash(abs_path: Path) -> str:
     digest = hashlib.sha256()
-    digest.update(Path(file_path).read_bytes())
+    digest.update(abs_path.read_bytes())
     return digest.hexdigest()
 
 
@@ -51,7 +52,12 @@ def get_or_create_repository(
 
 
 def _replace_file_row(
-    session: Session, repository_id: UUID, file_path: str, language: str | None
+    session: Session,
+    repository_id: UUID,
+    file_path: str,
+    language: str | None,
+    *,
+    repo_root: str | None,
 ) -> FileModel:
     existing = (
         session.query(FileModel)
@@ -63,11 +69,12 @@ def _replace_file_row(
         session.flush()
         logger.debug("persist: replaced existing file row path=%s", file_path)
 
+    abs_path = resolve_repo_path(file_path, repo_root) if repo_root else Path(file_path)
     file_row = FileModel(
         repository_id=repository_id,
         file_path=file_path,
         language=language,
-        file_hash=_file_hash(file_path),
+        file_hash=_file_hash(abs_path),
     )
     session.add(file_row)
     session.flush()
@@ -167,7 +174,12 @@ class IndexBatch:
                 self.repo_functions.pop(fn.name, None)
 
     def add_file(self, session: Session, file_result: dict) -> None:
-        file_path = file_result["file"]
+        raw_path = file_result["file"]
+        file_path = relative_to_repo(
+            raw_path,
+            self.repository.root_path or "",
+            self.repository.name,
+        )
         chunks = file_result.get("chunks") or []
         structure = file_result.get("structure") or {}
         calls = file_result.get("calls") or []
@@ -178,6 +190,7 @@ class IndexBatch:
             self.repository.id,
             file_path,
             file_result.get("language"),
+            repo_root=self.repository.root_path,
         )
         self.files_indexed += 1
 

@@ -1,14 +1,13 @@
 from __future__ import annotations
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from infrastructure.db.config import DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_USER,DATABASE_URL
+from infrastructure.db.config import DATABASE_URL,DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_USER
 from infrastructure.db.init_db import init_db
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
 _MAINTENANCE_DATABASES = ("postgres", "template1")
-
 
 def _require_db_config() -> None:
     missing = [
@@ -27,11 +26,9 @@ def _require_db_config() -> None:
             f"Database configuration incomplete. Set in backend/.env: {', '.join(missing)}"
         )
 
-
 def _maintenance_engine_url(maintenance_db: str) -> str:
     url = make_url(DATABASE_URL)
-    return url.set(database=maintenance_db).render_as_string(hide_password=False)
-
+    return url.set(database=maintenance_db).render_as_string(hide_password=True)
 
 def ensure_database_exists() -> None:
     """Create the application database when missing (requires CREATEDB or superuser)."""
@@ -74,7 +71,6 @@ def ensure_database_exists() -> None:
         f"Ensure PostgreSQL is running and user {DB_USER!r} can connect and create databases. "
         f"Last error: {last_error}"
     ) from last_error
-
 
 def ensure_db_ready() -> None:
     """Ensure application database exists and ORM tables are created."""

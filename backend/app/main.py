@@ -11,10 +11,9 @@ DEFAULT_FOLDER = Path("test_data/")
 DEFAULT_REPOSITORY = "test_data"
 
 MANUAL_QUERIES = [
-    "How does course_to_markdown work?",
-    "What does generate_course_structure do?",
+    "What is the main entry point of this codebase?",
+    "How is the HTTP API structured?",
 ]
-
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Code Weave ingestion and RAG CLI")
@@ -53,7 +52,6 @@ def _parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
-
 def main() -> None:
     args = _parse_args()
 
@@ -88,7 +86,6 @@ def main() -> None:
         print("-" * 72)
         print(item["answer"])
     print("\n" + "=" * 72)
-
 
 if __name__ == "__main__":
     main()

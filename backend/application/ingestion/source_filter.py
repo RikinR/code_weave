@@ -35,7 +35,16 @@ _SKIP_DIR_NAMES = frozenset(
         ".next",
         ".nuxt",
         "out",
-        ".md",
+        ".dart_tool",
+        ".pub-cache",
+        "vendor",
+        "pods",
+        "carthage",
+        "deriveddata",
+        ".terraform",
+        ".serverless",
+        "bower_components",
+        "jspm_packages",
     }
 )
 

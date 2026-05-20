@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from infrastructure.db.models.chunk_model import ChunkModel
 from infrastructure.db.models.file_model import FileModel
 from infrastructure.db.models.function_model import FunctionModel
+from application.ingestion.path_utils import relative_to_repo
 from infrastructure.db.models.repository_model import RepositoryModel
 from infrastructure.logging.logger import get_logger
 
@@ -41,7 +42,11 @@ def get_chunk_by_embedding_index(
         "repository_id": str(repo.id),
         "repository_name": repo.name,
         "file_id": str(file_row.id),
-        "file_path": file_row.file_path,
+        "file_path": relative_to_repo(
+            file_row.file_path,
+            repo.root_path or "",
+            repo.name,
+        ),
         "language": file_row.language,
         "function_id": str(fn.id),
         "function_name": fn.name,
