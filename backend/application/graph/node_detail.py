@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import UUID
 from sqlalchemy.orm import Session, joinedload
 from application.graph.build_graph import NODE_CLASS,NODE_FILE,NODE_FOLDER,NODE_FUNCTION,NODE_METHOD,node_id
+from application.ingestion.summarize_description import ensure_function_description
 from application.ingestion.lookup import get_chunk_by_embedding_index
 from infrastructure.db.models.chunk_model import ChunkModel
 from infrastructure.db.models.class_model import ClassModel
@@ -30,6 +31,13 @@ def _display_path(stored_path: str | None, repo: RepositoryModel | None) -> str 
     if repo is None or not repo.root_path:
         return stored_path.replace("\\", "/")
     return relative_to_repo(stored_path, repo.root_path, repo.name)
+
+
+def _node_description(stored: str | None, *, fallback: str) -> tuple[str | None, str]:
+    if stored and stored.strip():
+        text = stored.strip()
+        return text, text
+    return None, fallback
 
 def get_node_detail(session: Session, raw_node_id: str) -> dict | None:
     parsed = parse_node_id(raw_node_id)
@@ -120,13 +128,16 @@ def _file_detail(session: Session, file_id: UUID) -> dict | None:
     repo_root = repo.root_path
     display_path = _display_path(file_row.file_path, repo) or ""
     code = _safe_read(file_row.file_path, repo_root)
+    fallback = f"Source file ({file_row.language or 'unknown'})."
+    description, explanation = _node_description(file_row.description, fallback=fallback)
     return {
         "id": node_id(NODE_FILE, file_row.id),
         "type": NODE_FILE,
         "name": display_path.split("/")[-1],
         "file_path": display_path,
         "language": file_row.language,
-        "explanation": f"Source file ({file_row.language or 'unknown'}).",
+        "description": description,
+        "explanation": explanation,
         "code": code,
         "start_line": 1,
         "end_line": len(code.splitlines()) if code else 0,
@@ -147,13 +158,16 @@ def _class_detail(session: Session, class_id: UUID) -> dict | None:
         return None
     repo = cls.file.repository
     display_path = _display_path(cls.file.file_path, repo) or ""
+    fallback = f"Class {cls.name} defined in {display_path}."
+    description, explanation = _node_description(cls.description, fallback=fallback)
     return {
         "id": node_id(NODE_CLASS, cls.id),
         "type": NODE_CLASS,
         "name": cls.name,
         "file_path": display_path,
         "language": cls.file.language,
-        "explanation": f"Class {cls.name} defined in {display_path}.",
+        "description": description,
+        "explanation": explanation,
         "code": None,
         "start_line": None,
         "end_line": None,
@@ -195,6 +209,24 @@ def _function_detail(session: Session, function_id: UUID, node_type: str) -> dic
             ctx["file_path"] = _display_path(ctx.get("file_path"), repo)
             related.append(ctx)
 
+    resolved_description = ensure_function_description(
+        fn.description,
+        code=code,
+        name=fn.name,
+        file_path=display_path,
+        language=fn.file.language,
+        signature=fn.signature,
+    )
+    if resolved_description and resolved_description != fn.description:
+        fn.description = resolved_description
+        session.commit()
+
+    fallback = (
+        f"{'Method' if node_type == NODE_METHOD else 'Function'} {fn.name} "
+        f"in {display_path}."
+    )
+    description, explanation = _node_description(resolved_description, fallback=fallback)
+
     return {
         "id": node_id(node_type, fn.id),
         "type": node_type,
@@ -202,10 +234,8 @@ def _function_detail(session: Session, function_id: UUID, node_type: str) -> dic
         "file_path": display_path,
         "language": fn.file.language,
         "class_name": fn.class_.name if fn.class_ else None,
-        "explanation": (
-            f"{'Method' if node_type == NODE_METHOD else 'Function'} {fn.name} "
-            f"in {display_path}."
-        ),
+        "description": description,
+        "explanation": explanation,
         "code": code,
         "start_line": fn.start_line,
         "end_line": fn.end_line,

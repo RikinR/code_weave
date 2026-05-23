@@ -58,6 +58,7 @@ def _replace_file_row(
     language: str | None,
     *,
     repo_root: str | None,
+    description: str | None = None,
 ) -> FileModel:
     existing = (
         session.query(FileModel)
@@ -75,6 +76,7 @@ def _replace_file_row(
         file_path=file_path,
         language=language,
         file_hash=_file_hash(abs_path),
+        description=description,
     )
     session.add(file_row)
     session.flush()
@@ -102,7 +104,8 @@ def _function_for_chunk(
         start_byte=chunk.get("start"),
         end_byte=chunk.get("end"),
         signature=_first_signature_line(chunk.get("code") or ""),
-        docstring=None,
+        docstring=chunk.get("description"),
+        description=chunk.get("description"),
     )
     session.add(fn)
     session.flush()
@@ -191,13 +194,18 @@ class IndexBatch:
             file_path,
             file_result.get("language"),
             repo_root=self.repository.root_path,
+            description=file_result.get("description"),
         )
         self.files_indexed += 1
 
         class_row: ClassModel | None = None
         class_name = structure.get("class")
         if class_name:
-            class_row = ClassModel(file_id=file_row.id, name=class_name)
+            class_row = ClassModel(
+                file_id=file_row.id,
+                name=class_name,
+                description=structure.get("class_description"),
+            )
             session.add(class_row)
             session.flush()
             self.classes_indexed += 1
@@ -269,7 +277,7 @@ def store_chunks_with_embeddings(
                 content=chunk["code"],
                 start_line=chunk.get("start_line"),
                 end_line=chunk.get("end_line"),
-                chunk_type="function",
+                chunk_type=chunk.get("chunk_type") or "function",
                 token_count=None,
             )
         )

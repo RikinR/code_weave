@@ -15,3 +15,6 @@ class RepositoryModel(Base):
     created_at: Mapped[str] = mapped_column(TIMESTAMP, server_default=func.now())
     files = relationship("FileModel", back_populates="repository", cascade="all, delete")
     chunks = relationship("ChunkModel", back_populates="repository", cascade="all, delete")
+    chat_messages = relationship(
+        "ChatMessageModel", back_populates="repository", cascade="all, delete-orphan"
+    )

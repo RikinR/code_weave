@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/explorer/presentation/explorer_screen.dart';
@@ -25,7 +26,11 @@ GoRouter createRouter() {
         builder: (context, state) {
           final repoId = state.pathParameters['repositoryId']!;
           final name = state.uri.queryParameters['name'];
-          return ExplorerScreen(repositoryId: repoId, repositoryName: name);
+          return ExplorerScreen(
+            key: ValueKey(repoId),
+            repositoryId: repoId,
+            repositoryName: name,
+          );
         },
       ),
     ],

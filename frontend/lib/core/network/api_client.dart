@@ -101,6 +101,11 @@ class ApiClient {
     return res.data as Map<String, dynamic>;
   }
 
+  Future<List<dynamic>> getChatMessages(String repositoryId) async {
+    final res = await dio.get('/api/repositories/$repositoryId/chat/messages');
+    return res.data as List<dynamic>;
+  }
+
   Future<Map<String, dynamic>> chatSync({
     required String repositoryId,
     required String query,

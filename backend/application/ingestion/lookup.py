@@ -57,6 +57,8 @@ def get_chunk_by_embedding_index(
         "start_line": chunk.start_line,
         "end_line": chunk.end_line,
         "signature": fn.signature,
+        "description": fn.description,
+        "chunk_type": chunk.chunk_type or "function",
     }
 
 

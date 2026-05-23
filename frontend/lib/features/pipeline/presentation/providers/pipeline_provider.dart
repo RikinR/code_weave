@@ -78,20 +78,25 @@ class PipelineProvider extends ChangeNotifier {
 
   bool get canRetry => isInterrupted;
 
-  Future<void> start(String id, {String? repoName}) async {
-    _session++;
-    final session = _session;
-
+  void prepareForJob(String id, {String? repoName}) {
     _uiTicker?.cancel();
     _pollTimer?.cancel();
     _notifyDebounce?.cancel();
-
     jobId = id;
     repositoryName = repoName;
     repositoryId = null;
     status = 'pending';
     error = null;
     stages = [];
+    _startedAt = null;
+    _lastEventAt = null;
+  }
+
+  Future<void> start(String id, {String? repoName}) async {
+    _session++;
+    final session = _session;
+
+    prepareForJob(id, repoName: repoName);
     _startedAt = DateTime.now();
     _lastEventAt = _startedAt;
 
@@ -147,7 +152,6 @@ class PipelineProvider extends ChangeNotifier {
           _notify();
           return;
         } catch (_) {
-          // fall through to friendly message
         }
       }
       error = _friendlyNetworkError(e);

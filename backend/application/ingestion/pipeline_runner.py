@@ -5,7 +5,7 @@ from uuid import UUID
 from application.ingestion.job_launcher import launch_ingestion_worker, maybe_resume_queued_job
 from application.graph.build_graph import build_architecture_graph
 from application.ingestion.index_folder import index_folder
-from application.ingestion.source_filter import iter_source_files
+from application.ingestion.source_filter import classify_ingestible_file, iter_ingestible_files
 from application.ingestion.zip_extract import ZipExtractionError, extract_zip
 from application.repos.processing_tracker import IngestionJob, tracker
 from infrastructure.db.session import SessionLocal
@@ -63,16 +63,28 @@ def run_ingestion_job(
         job.complete_stage("zip_extraction", f"Extracted to {root}")
 
         job.start_stage("file_scanning")
-        sources = list(iter_source_files(root))
-        job.log("file_scanning", f"Found {len(sources)} ingestible source files")
+        sources = list(iter_ingestible_files(root))
+        code_count = sum(1 for p in sources if classify_ingestible_file(p) == "code")
+        context_count = len(sources) - code_count
+        job.log(
+            "file_scanning",
+            f"Found {len(sources)} ingestible files ({code_count} code, {context_count} context)",
+        )
         if not sources:
-            job.fail_stage("file_scanning", "No supported source files found in archive")
+            job.fail_stage("file_scanning", "No supported source or context files found in archive")
             return
         job.complete_stage("file_scanning")
 
         job.start_stage("language_detection")
         langs: dict[str, int] = {}
         for path in sources:
+            kind = classify_ingestible_file(path)
+            if kind == "context":
+                from application.ingestion.process_context import infer_context_kind
+
+                label = infer_context_kind(path)
+                langs[label] = langs.get(label, 0) + 1
+                continue
             try:
                 lang = infer_language(path)
                 langs[lang] = langs.get(lang, 0) + 1

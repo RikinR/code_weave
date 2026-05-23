@@ -68,6 +68,7 @@ class NodeDetailResponse(BaseModel):
     file_path: str | None = None
     language: str | None = None
     class_name: str | None = None
+    description: str | None = None
     explanation: str | None = None
     code: str | None = None
     start_line: int | None = None
@@ -101,3 +102,10 @@ class ChatCompleteEvent(BaseModel):
     answer: str
     citations: list[ChatCitation]
     highlight_node_ids: list[str]
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict] = Field(default_factory=list)
+    created_at: str | None = None

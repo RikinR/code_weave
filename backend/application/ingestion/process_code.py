@@ -1,6 +1,7 @@
 from __future__ import annotations
 from tree_sitter import Node
 from application.ingestion.call_extraction import extract_calls
+from application.ingestion.description_extract import extract_class_description,extract_file_description,resolve_function_description
 from application.ingestion.line_numbers import byte_offset_to_line
 from infrastructure.file.reader import read_file
 from infrastructure.logging.logger import get_logger
@@ -72,9 +73,12 @@ def extract_functions(
     query,
     function_node_types: frozenset[str],
     wrapper_types: frozenset[str],
+    *,
+    language: str | None = None,
 ) -> list[dict]:
     result: list[dict] = []
     seen: set[int] = set()
+    source_text = code.decode("utf-8", errors="replace")
 
     for node, cap in query.captures(root):
         if cap != "fn_def" or node.type not in function_node_types:
@@ -111,6 +115,13 @@ def extract_functions(
             {
                 "name": name,
                 "code": chunk_code,
+                "description": resolve_function_description(
+                    source=source_text,
+                    chunk_code=chunk_code,
+                    definition_start=def_start,
+                    name=name,
+                    language=language,
+                ),
                 "start": start,
                 "end": end,
                 "definition_start": def_start,
@@ -124,8 +135,8 @@ def extract_functions(
     return result
 
 
-def extract_structure(code: bytes, root: Node, queries: dict) -> dict:
-    result: dict = {"class": None, "methods": [], "attributes": []}
+def extract_structure(code: bytes, root: Node, queries: dict, *, language: str | None = None) -> dict:
+    result: dict = {"class": None, "class_description": None, "methods": [], "attributes": []}
 
     class_methods = queries["class_methods"]
     for node, cap in class_methods.captures(root):
@@ -149,6 +160,14 @@ def extract_structure(code: bytes, root: Node, queries: dict) -> dict:
                 "attribute name extracted: %s",
                 _text_slice(code, node.start_byte, node.end_byte),
             )
+
+    if result["class"]:
+        source = code.decode("utf-8", errors="replace")
+        result["class_description"] = extract_class_description(
+            source,
+            result["class"],
+            language=language,
+        )
 
     return result
 
@@ -185,9 +204,12 @@ def process_file(file_path: str, lang: str | None = None) -> dict:
         queries["functions"],
         spec.function_node_types,
         spec.wrapper_types,
+        language=lang,
     )
-    structure = extract_structure(code, root, queries)
+    structure = extract_structure(code, root, queries, language=lang)
     calls = extract_calls(code, root, lang)
+    source_text = code.decode("utf-8", errors="replace")
+    file_description = extract_file_description(source_text, language=lang)
 
     if not chunks:
         logger.warning(
@@ -215,6 +237,7 @@ def process_file(file_path: str, lang: str | None = None) -> dict:
     return {
         "file": file_path,
         "language": lang,
+        "description": file_description,
         "chunks": chunks,
         "structure": structure,
         "calls": calls,

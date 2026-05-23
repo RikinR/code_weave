@@ -30,6 +30,11 @@ class _PipelineScreenState extends State<PipelineScreen> with SingleTickerProvid
       duration: const Duration(seconds: 2),
     )..repeat();
 
+    context.read<PipelineProvider>().prepareForJob(
+          widget.jobId,
+          repoName: widget.repositoryName,
+        );
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<PipelineProvider>().start(
@@ -47,6 +52,7 @@ class _PipelineScreenState extends State<PipelineScreen> with SingleTickerProvid
 
   void _maybeNavigateToExplorer(PipelineProvider provider) {
     if (_navigatedToExplorer) return;
+    if (provider.jobId != widget.jobId) return;
     if (provider.status != 'completed' || provider.repositoryId == null) return;
     _navigatedToExplorer = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {

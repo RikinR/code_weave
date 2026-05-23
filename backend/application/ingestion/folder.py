@@ -1,6 +1,7 @@
 from pathlib import Path
 from application.ingestion.process_code import process_file
-from application.ingestion.source_filter import iter_source_files
+from application.ingestion.process_context import process_context_file
+from application.ingestion.source_filter import classify_ingestible_file, iter_ingestible_files
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -12,11 +13,14 @@ def process_folder(folder: Path) -> list[dict]:
         logger.warning("folder does not exist or is not a directory: %s", folder)
         return result
 
-    for file in iter_source_files(folder):
+    for file in iter_ingestible_files(folder):
         path = str(file)
-        logger.debug("parse %s (language inferred from extension)", path)
+        logger.debug("process %s", path)
         try:
-            result.append(process_file(file_path=path))
+            if classify_ingestible_file(file) == "context":
+                result.append(process_context_file(path))
+            else:
+                result.append(process_file(file_path=path))
         except RuntimeError as exc:
             logger.warning("skip %s: %s", path, exc)
         except Exception:

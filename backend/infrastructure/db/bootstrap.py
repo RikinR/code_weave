@@ -28,7 +28,7 @@ def _require_db_config() -> None:
 
 def _maintenance_engine_url(maintenance_db: str) -> str:
     url = make_url(DATABASE_URL)
-    return url.set(database=maintenance_db).render_as_string(hide_password=True)
+    return url.set(database=maintenance_db).render_as_string(hide_password=False)
 
 def ensure_database_exists() -> None:
     """Create the application database when missing (requires CREATEDB or superuser)."""

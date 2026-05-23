@@ -37,23 +37,29 @@ def index_folder(
         on_progress("file_scanning", f"Scanning {folder}", 10.0)
 
     from application.ingestion.process_code import process_file
-    from application.ingestion.source_filter import iter_source_files
+    from application.ingestion.process_context import process_context_file
+    from application.ingestion.source_filter import classify_ingestible_file, iter_ingestible_files
 
     parsed_files: list[dict] = []
     if sources is None:
-        sources = list(iter_source_files(folder))
+        sources = list(iter_ingestible_files(folder))
     total_sources = max(len(sources), 1)
     for index, source in enumerate(sources, start=1):
         path = str(source)
+        file_kind = classify_ingestible_file(source)
+        stage_label = "Parsing" if file_kind == "code" else "Reading"
         if on_progress:
             pct = 15.0 + (index / total_sources) * 40.0
             on_progress(
                 "tree_sitter_parsing",
-                f"Parsing {source.name} ({index}/{total_sources})",
+                f"{stage_label} {source.name} ({index}/{total_sources})",
                 pct,
             )
         try:
-            parsed_files.append(process_file(file_path=path))
+            if file_kind == "context":
+                parsed_files.append(process_context_file(path))
+            else:
+                parsed_files.append(process_file(file_path=path))
         except RuntimeError as exc:
             logger.warning("index_folder: skip %s: %s", path, exc)
         except Exception:

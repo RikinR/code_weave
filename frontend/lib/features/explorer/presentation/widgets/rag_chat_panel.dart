@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/layout/responsive.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../providers/explorer_provider.dart';
+import 'structured_chat_text.dart';
 
 class RagChatPanel extends StatefulWidget {
   const RagChatPanel({
@@ -45,18 +46,59 @@ class _RagChatPanelState extends State<RagChatPanel> {
               border: Border(bottom: BorderSide(color: AppTheme.border)),
               color: AppTheme.surface,
             ),
-            child: Row(
-              children: [
-                const Icon(Icons.chat_outlined, color: AppTheme.accent, size: 20),
-                const SizedBox(width: 10),
-                const Text('RAG Assistant', style: TextStyle(fontWeight: FontWeight.w600)),
-                const Spacer(),
-                const Text('Beginner', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                Switch(
-                  value: widget.beginnerMode,
-                  onChanged: widget.onBeginnerChanged,
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final showBeginnerLabel = constraints.maxWidth >= 300;
+                return Row(
+                  children: [
+                    const Icon(Icons.chat_outlined, color: AppTheme.accent, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          const Flexible(
+                            child: Text(
+                              'RAG Assistant',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (widget.beginnerMode) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.accentSoft,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: const Text(
+                                'Beginner',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (showBeginnerLabel)
+                      const Text(
+                        'Beginner mode',
+                        style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                      ),
+                    Tooltip(
+                      message: 'Beginner mode',
+                      child: Switch(
+                        value: widget.beginnerMode,
+                        onChanged: widget.onBeginnerChanged,
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
           Expanded(
@@ -93,12 +135,9 @@ class _RagChatPanelState extends State<RagChatPanel> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                msg.text.isEmpty && widget.streaming ? '…' : msg.text,
-                                style: TextStyle(
-                                  color: isUser ? Colors.white : AppTheme.textPrimary,
-                                  fontSize: 14,
-                                ),
+                              StructuredChatText(
+                                text: msg.text.isEmpty && widget.streaming ? '…' : msg.text,
+                                isUser: isUser,
                               ),
                               if (msg.citations.isNotEmpty) ...[
                                 const SizedBox(height: 8),

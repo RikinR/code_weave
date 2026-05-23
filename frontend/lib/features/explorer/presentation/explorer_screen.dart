@@ -29,13 +29,23 @@ class _ExplorerScreenState extends State<ExplorerScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<ExplorerProvider>().load(
-            widget.repositoryId,
-            name: widget.repositoryName,
-          );
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadExplorer());
+  }
+
+  @override
+  void didUpdateWidget(ExplorerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repositoryId != widget.repositoryId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadExplorer());
+    }
+  }
+
+  void _loadExplorer() {
+    if (!mounted) return;
+    context.read<ExplorerProvider>().load(
+          widget.repositoryId,
+          name: widget.repositoryName,
+        );
   }
 
   @override
@@ -475,7 +485,22 @@ class _NodeDetailsPanel extends StatelessWidget {
             style: const TextStyle(color: AppTheme.textMuted),
           ),
         const SizedBox(height: 12),
-        Text(detail!['explanation']?.toString() ?? ''),
+        if (detail!['description'] != null &&
+            detail!['description'].toString().trim().isNotEmpty) ...[
+          Text(
+            'What it does',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            detail!['description'].toString(),
+            style: const TextStyle(fontSize: 14, height: 1.45),
+          ),
+        ] else
+          Text(detail!['explanation']?.toString() ?? ''),
         const SizedBox(height: 16),
         if (code != null && code.isNotEmpty)
           Container(

@@ -16,6 +16,7 @@ class FileModel(Base):
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     language: Mapped[str | None] = mapped_column(String(50))
     file_hash: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(TIMESTAMP, server_default=func.now())
     repository = relationship("RepositoryModel", back_populates="files")
     classes = relationship("ClassModel", back_populates="file", cascade="all, delete")

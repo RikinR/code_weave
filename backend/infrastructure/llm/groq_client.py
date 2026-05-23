@@ -15,7 +15,13 @@ def _client() -> Groq:
         )
     return Groq(api_key=GROQ_API_KEY)
 
-def chat_completion(messages: list[dict], model: str | None = None) -> str:
+def chat_completion(
+    messages: list[dict],
+    model: str | None = None,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int = 1024,
+) -> str:
     if not messages:
         raise GroqError("messages must not be empty")
 
@@ -26,7 +32,8 @@ def chat_completion(messages: list[dict], model: str | None = None) -> str:
         response = _client().chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.2,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
     except Exception as exc:
         logger.error("groq: chat completion failed", exc_info=True)
@@ -39,7 +46,13 @@ def chat_completion(messages: list[dict], model: str | None = None) -> str:
     logger.info("groq: received response (%d chars)", len(content))
     return content
 
-def chat_completion_stream(messages: list[dict], model: str | None = None):
+def chat_completion_stream(
+    messages: list[dict],
+    model: str | None = None,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int = 1024,
+):
     if not messages:
         raise GroqError("messages must not be empty")
 
@@ -48,7 +61,8 @@ def chat_completion_stream(messages: list[dict], model: str | None = None):
         stream = _client().chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.2,
+            temperature=temperature,
+            max_tokens=max_tokens,
             stream=True,
         )
         for chunk in stream:

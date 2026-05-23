@@ -18,6 +18,7 @@ class FunctionModel(Base):
     end_byte: Mapped[int | None] = mapped_column(Integer)
     signature: Mapped[str | None] = mapped_column(Text)
     docstring: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(TIMESTAMP, server_default=func.now())
     file = relationship("FileModel", back_populates="functions")
     class_ = relationship("ClassModel", back_populates="functions")

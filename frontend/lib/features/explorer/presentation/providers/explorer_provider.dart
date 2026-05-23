@@ -61,6 +61,14 @@ class ExplorerProvider extends ChangeNotifier {
     repositoryName = name;
     loading = true;
     error = null;
+    nodes = [];
+    edges = [];
+    rootId = null;
+    selectedNodeId = null;
+    highlightedNodeIds = {};
+    nodeDetail = null;
+    messages.clear();
+    chatStreaming = false;
     notifyListeners();
     try {
       final hierarchy = await _api.getHierarchy(repoId);
@@ -72,6 +80,20 @@ class ExplorerProvider extends ChangeNotifier {
       edges = (graph['edges'] as List<dynamic>)
           .map((e) => GraphEdgeModel.fromJson(e as Map<String, dynamic>))
           .toList();
+      try {
+        final chatHistory = await _api.getChatMessages(repoId);
+        messages.addAll(
+          chatHistory.map(
+            (row) => ChatMessage(
+              role: row['role'] as String,
+              text: row['content'] as String? ?? '',
+              citations: (row['citations'] as List<dynamic>? ?? [])
+                  .cast<Map<String, dynamic>>(),
+            ),
+          ),
+        );
+      } catch (_) {
+      }
     } catch (e) {
       error = e.toString();
     } finally {
@@ -138,6 +160,12 @@ class ExplorerProvider extends ChangeNotifier {
             if (token.isNotEmpty) {
               streamed = true;
               assistant.text += token;
+              notifyListeners();
+            }
+          } else if (event == 'answer') {
+            final answer = data['answer'] as String? ?? '';
+            if (answer.isNotEmpty) {
+              assistant.text = answer;
               notifyListeners();
             }
           } else if (event == 'error') {
