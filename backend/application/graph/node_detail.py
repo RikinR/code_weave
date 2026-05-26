@@ -1,8 +1,16 @@
+"""Rich detail payloads for individual architecture graph nodes.
+
+Resolves ``type:id`` node ids from :mod:`application.graph.build_graph` into
+code, descriptions, call relationships, and related chunks. Used by graph API
+routes and enriches function descriptions via ingestion helpers when needed.
+"""
+
 from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 from sqlalchemy.orm import Session, joinedload
-from application.graph.build_graph import NODE_CLASS,NODE_FILE,NODE_FOLDER,NODE_FUNCTION,NODE_METHOD,node_id
+from application.graph.build_graph import NODE_CLASS, NODE_FILE, NODE_FOLDER, NODE_FUNCTION, NODE_METHOD, node_id
+from application.ingestion.description_extract import is_generic_description
 from application.ingestion.summarize_description import ensure_function_description
 from application.ingestion.lookup import get_chunk_by_embedding_index
 from infrastructure.db.models.chunk_model import ChunkModel
@@ -14,37 +22,36 @@ from infrastructure.db.models.repository_model import RepositoryModel
 from application.ingestion.path_utils import relative_to_repo, resolve_repo_path
 from infrastructure.file.reader import read_file
 from infrastructure.logging.logger import get_logger
-
 logger = get_logger(__name__)
 
 def parse_node_id(raw: str) -> tuple[str, str] | None:
-    if ":" not in raw:
+    """Split a graph node id into ``(node_type, entity_key)`` or return ``None`` if invalid."""
+    if ':' not in raw:
         return None
-    node_type, _, entity_key = raw.partition(":")
+    node_type, _, entity_key = raw.partition(':')
     if not node_type or not entity_key:
         return None
-    return node_type, entity_key
+    return (node_type, entity_key)
 
 def _display_path(stored_path: str | None, repo: RepositoryModel | None) -> str | None:
     if not stored_path:
         return stored_path
     if repo is None or not repo.root_path:
-        return stored_path.replace("\\", "/")
+        return stored_path.replace('\\', '/')
     return relative_to_repo(stored_path, repo.root_path, repo.name)
-
 
 def _node_description(stored: str | None, *, fallback: str) -> tuple[str | None, str]:
     if stored and stored.strip():
         text = stored.strip()
-        return text, text
-    return None, fallback
+        return (text, text)
+    return (None, fallback)
 
 def get_node_detail(session: Session, raw_node_id: str) -> dict | None:
+    """Return a detail dict for ``raw_node_id``, or ``None`` when unknown or malformed."""
     parsed = parse_node_id(raw_node_id)
     if parsed is None:
         return None
     node_type, entity_key = parsed
-
     if node_type == NODE_FILE:
         try:
             return _file_detail(session, UUID(entity_key))
@@ -60,7 +67,7 @@ def get_node_detail(session: Session, raw_node_id: str) -> dict | None:
             return _function_detail(session, UUID(entity_key), node_type)
         except ValueError:
             return None
-    if node_type == "repository":
+    if node_type == 'repository':
         try:
             return _repository_detail(session, UUID(entity_key))
         except ValueError:
@@ -70,9 +77,9 @@ def get_node_detail(session: Session, raw_node_id: str) -> dict | None:
     return None
 
 def _folder_detail(session: Session, folder_key: str) -> dict | None:
-    if "|" not in folder_key:
+    if '|' not in folder_key:
         return None
-    repo_id_str, path_key = folder_key.split("|", 1)
+    repo_id_str, path_key = folder_key.split('|', 1)
     try:
         repo_uuid = UUID(repo_id_str)
     except ValueError:
@@ -81,212 +88,79 @@ def _folder_detail(session: Session, folder_key: str) -> dict | None:
     if repo is None:
         return None
     display_path = path_key or repo.name
-    return {
-        "id": node_id(NODE_FOLDER, folder_key),
-        "type": NODE_FOLDER,
-        "name": display_path.split("/")[-1] if path_key else repo.name,
-        "file_path": display_path,
-        "explanation": f"Folder {display_path} in repository {repo.name}.",
-        "code": None,
-        "start_line": None,
-        "end_line": None,
-        "incoming_calls": [],
-        "outgoing_calls": [],
-        "related_chunks": [],
-        "relationships": [],
-    }
+    return {'id': node_id(NODE_FOLDER, folder_key), 'type': NODE_FOLDER, 'name': display_path.split('/')[-1] if path_key else repo.name, 'file_path': display_path, 'explanation': f'Folder {display_path} in repository {repo.name}.', 'code': None, 'start_line': None, 'end_line': None, 'incoming_calls': [], 'outgoing_calls': [], 'related_chunks': [], 'relationships': []}
 
 def _repository_detail(session: Session, repository_id: UUID) -> dict | None:
     repo = session.get(RepositoryModel, repository_id)
     if repo is None:
         return None
-    return {
-        "id": node_id("repository", repo.id),
-        "type": "repository",
-        "name": repo.name,
-        "file_path": repo.name,
-        "explanation": f"Indexed repository {repo.name}.",
-        "code": None,
-        "start_line": None,
-        "end_line": None,
-        "incoming_calls": [],
-        "outgoing_calls": [],
-        "related_chunks": [],
-        "relationships": [],
-    }
+    return {'id': node_id('repository', repo.id), 'type': 'repository', 'name': repo.name, 'file_path': repo.name, 'explanation': f'Indexed repository {repo.name}.', 'code': None, 'start_line': None, 'end_line': None, 'incoming_calls': [], 'outgoing_calls': [], 'related_chunks': [], 'relationships': []}
 
 def _file_detail(session: Session, file_id: UUID) -> dict | None:
-    file_row = (
-        session.query(FileModel)
-        .options(joinedload(FileModel.repository))
-        .filter_by(id=file_id)
-        .one_or_none()
-    )
+    file_row = session.query(FileModel).options(joinedload(FileModel.repository)).filter_by(id=file_id).one_or_none()
     if file_row is None:
         return None
     repo = file_row.repository
     repo_root = repo.root_path
-    display_path = _display_path(file_row.file_path, repo) or ""
+    display_path = _display_path(file_row.file_path, repo) or ''
     code = _safe_read(file_row.file_path, repo_root)
     fallback = f"Source file ({file_row.language or 'unknown'})."
     description, explanation = _node_description(file_row.description, fallback=fallback)
-    return {
-        "id": node_id(NODE_FILE, file_row.id),
-        "type": NODE_FILE,
-        "name": display_path.split("/")[-1],
-        "file_path": display_path,
-        "language": file_row.language,
-        "description": description,
-        "explanation": explanation,
-        "code": code,
-        "start_line": 1,
-        "end_line": len(code.splitlines()) if code else 0,
-        "incoming_calls": [],
-        "outgoing_calls": [],
-        "related_chunks": [],
-        "relationships": [{"kind": "contains", "target_type": "class/function"}],
-    }
+    return {'id': node_id(NODE_FILE, file_row.id), 'type': NODE_FILE, 'name': display_path.split('/')[-1], 'file_path': display_path, 'language': file_row.language, 'indexing_notice': file_row.indexing_notice, 'description': description, 'explanation': explanation, 'code': code, 'start_line': 1, 'end_line': len(code.splitlines()) if code else 0, 'incoming_calls': [], 'outgoing_calls': [], 'related_chunks': [], 'relationships': [{'kind': 'contains', 'target_type': 'class/function'}]}
 
 def _class_detail(session: Session, class_id: UUID) -> dict | None:
-    cls = (
-        session.query(ClassModel)
-        .options(joinedload(ClassModel.file).joinedload(FileModel.repository))
-        .filter_by(id=class_id)
-        .one_or_none()
-    )
+    cls = session.query(ClassModel).options(joinedload(ClassModel.file).joinedload(FileModel.repository)).filter_by(id=class_id).one_or_none()
     if cls is None:
         return None
     repo = cls.file.repository
-    display_path = _display_path(cls.file.file_path, repo) or ""
-    fallback = f"Class {cls.name} defined in {display_path}."
+    display_path = _display_path(cls.file.file_path, repo) or ''
+    fallback = f'Class {cls.name} defined in {display_path}.'
     description, explanation = _node_description(cls.description, fallback=fallback)
-    return {
-        "id": node_id(NODE_CLASS, cls.id),
-        "type": NODE_CLASS,
-        "name": cls.name,
-        "file_path": display_path,
-        "language": cls.file.language,
-        "description": description,
-        "explanation": explanation,
-        "code": None,
-        "start_line": None,
-        "end_line": None,
-        "incoming_calls": [],
-        "outgoing_calls": [],
-        "related_chunks": [],
-        "relationships": [],
-    }
+    return {'id': node_id(NODE_CLASS, cls.id), 'type': NODE_CLASS, 'name': cls.name, 'file_path': display_path, 'language': cls.file.language, 'description': description, 'explanation': explanation, 'code': None, 'start_line': None, 'end_line': None, 'incoming_calls': [], 'outgoing_calls': [], 'related_chunks': [], 'relationships': []}
 
 def _function_detail(session: Session, function_id: UUID, node_type: str) -> dict | None:
-    fn = (
-        session.query(FunctionModel)
-        .options(
-            joinedload(FunctionModel.file).joinedload(FileModel.repository),
-            joinedload(FunctionModel.class_),
-            joinedload(FunctionModel.chunks),
-        )
-        .filter_by(id=function_id)
-        .one_or_none()
-    )
+    fn = session.query(FunctionModel).options(joinedload(FunctionModel.file).joinedload(FileModel.repository), joinedload(FunctionModel.class_), joinedload(FunctionModel.chunks)).filter_by(id=function_id).one_or_none()
     if fn is None:
         return None
-
     repo = fn.file.repository
     repo_root = repo.root_path if repo else None
-    display_path = _display_path(fn.file.file_path, repo) or ""
-
+    display_path = _display_path(fn.file.file_path, repo) or ''
     chunk = fn.chunks[0] if fn.chunks else None
     code = chunk.content if chunk else _extract_from_file(fn, repo_root)
     incoming = _call_refs(session, fn, repo=repo, incoming=True)
     outgoing = _call_refs(session, fn, repo=repo, incoming=False)
     related = []
     if chunk and chunk.embedding_index is not None:
-        ctx = get_chunk_by_embedding_index(
-            session, fn.file.repository_id, chunk.embedding_index
-        )
+        ctx = get_chunk_by_embedding_index(session, fn.file.repository_id, chunk.embedding_index)
         if ctx:
             ctx = dict(ctx)
-            ctx["file_path"] = _display_path(ctx.get("file_path"), repo)
+            ctx['file_path'] = _display_path(ctx.get('file_path'), repo)
             related.append(ctx)
-
-    resolved_description = ensure_function_description(
-        fn.description,
-        code=code,
-        name=fn.name,
-        file_path=display_path,
-        language=fn.file.language,
-        signature=fn.signature,
-    )
-    if resolved_description and resolved_description != fn.description:
-        fn.description = resolved_description
-        session.commit()
-
-    fallback = (
-        f"{'Method' if node_type == NODE_METHOD else 'Function'} {fn.name} "
-        f"in {display_path}."
-    )
+    use_llm = is_generic_description(fn.description)
+    resolved_description = ensure_function_description(fn.description, code=code, name=fn.name, file_path=display_path, language=fn.file.language, signature=fn.signature, allow_llm=use_llm)
+    display_type = node_type
+    if chunk and chunk.chunk_type == 'class':
+        display_type = NODE_CLASS
+    elif chunk and chunk.chunk_type == 'module':
+        display_type = 'module'
+    kind_label = {'method': 'Method', 'function': 'Function', 'class': 'Class', 'module': 'Module'}.get(display_type, 'Function')
+    fallback = f'{kind_label} {fn.name} in {display_path}.'
     description, explanation = _node_description(resolved_description, fallback=fallback)
+    return {'id': node_id(node_type, fn.id), 'type': display_type, 'name': fn.name, 'file_path': display_path, 'language': fn.file.language, 'class_name': fn.class_.name if fn.class_ else None, 'description': description, 'explanation': explanation, 'code': code, 'start_line': fn.start_line, 'end_line': fn.end_line, 'signature': fn.signature, 'incoming_calls': incoming, 'outgoing_calls': outgoing, 'related_chunks': related, 'relationships': [{'kind': 'incoming', 'count': len(incoming)}, {'kind': 'outgoing', 'count': len(outgoing)}], 'function_id': str(fn.id), 'file_id': str(fn.file_id)}
 
-    return {
-        "id": node_id(node_type, fn.id),
-        "type": node_type,
-        "name": fn.name,
-        "file_path": display_path,
-        "language": fn.file.language,
-        "class_name": fn.class_.name if fn.class_ else None,
-        "description": description,
-        "explanation": explanation,
-        "code": code,
-        "start_line": fn.start_line,
-        "end_line": fn.end_line,
-        "signature": fn.signature,
-        "incoming_calls": incoming,
-        "outgoing_calls": outgoing,
-        "related_chunks": related,
-        "relationships": [
-            {"kind": "incoming", "count": len(incoming)},
-            {"kind": "outgoing", "count": len(outgoing)},
-        ],
-        "function_id": str(fn.id),
-        "file_id": str(fn.file_id),
-    }
-
-def _call_refs(
-    session: Session,
-    fn: FunctionModel,
-    *,
-    repo: RepositoryModel | None,
-    incoming: bool,
-) -> list[dict]:
+def _call_refs(session: Session, fn: FunctionModel, *, repo: RepositoryModel | None, incoming: bool) -> list[dict]:
     load = joinedload(FunctionModel.file).joinedload(FileModel.repository)
     if incoming:
-        rows = (
-            session.query(FunctionCallModel)
-            .options(joinedload(FunctionCallModel.caller).options(load))
-            .filter_by(callee_function_id=fn.id)
-            .all()
-        )
+        rows = session.query(FunctionCallModel).options(joinedload(FunctionCallModel.caller).options(load)).filter_by(callee_function_id=fn.id).all()
         targets = [r.caller for r in rows]
     else:
-        rows = (
-            session.query(FunctionCallModel)
-            .options(joinedload(FunctionCallModel.callee).options(load))
-            .filter_by(caller_function_id=fn.id)
-            .all()
-        )
+        rows = session.query(FunctionCallModel).options(joinedload(FunctionCallModel.callee).options(load)).filter_by(caller_function_id=fn.id).all()
         targets = [r.callee for r in rows]
-
     refs: list[dict] = []
     for other in targets:
         otype = NODE_METHOD if other.class_id else NODE_FUNCTION
         stored = other.file.file_path if other.file else None
-        refs.append(
-            {
-                "node_id": node_id(otype, other.id),
-                "name": other.name,
-                "file_path": _display_path(stored, repo),
-            }
-        )
+        refs.append({'node_id': node_id(otype, other.id), 'name': other.name, 'file_path': _display_path(stored, repo)})
     return refs
 
 def _extract_from_file(fn: FunctionModel, repo_root: str | None) -> str | None:
@@ -296,13 +170,13 @@ def _extract_from_file(fn: FunctionModel, repo_root: str | None) -> str | None:
     lines = text.splitlines()
     start = max(0, fn.start_line - 1)
     end = min(len(lines), fn.end_line)
-    return "\n".join(lines[start:end])
+    return '\n'.join(lines[start:end])
 
 def _safe_read(file_path: str, repo_root: str | None) -> str | None:
     try:
         abs_path = resolve_repo_path(file_path, repo_root) if repo_root else Path(file_path)
         data = read_file(str(abs_path))
-        return data.decode("utf-8", errors="replace")
+        return data.decode('utf-8', errors='replace')
     except Exception:
-        logger.warning("node_detail: could not read %s", file_path)
+        logger.warning('node_detail: could not read %s', file_path)
         return None

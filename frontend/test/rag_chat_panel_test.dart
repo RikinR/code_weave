@@ -1,3 +1,5 @@
+/// Widget tests for the RAG chat panel (streaming UI, citations).
+library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

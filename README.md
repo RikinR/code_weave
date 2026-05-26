@@ -1,63 +1,173 @@
+<p align="center">
+  <img src="images/app-logo-tight.png" alt="Code Weave — AI Powered Code Intelligence" width="420" />
+</p>
+
 # Code Weave
 
-**Upload a codebase as a ZIP, index source code and documentation, explore it through an interactive architecture graph, and ask questions with repository-scoped RAG chat.**
 
-Code Weave is a full-stack project built for demonstrating end-to-end code intelligence: parsing, structural graph extraction, documentation indexing, local embeddings, vector search, and LLM-grounded answers with citations. A Python/FastAPI backend owns ingestion and retrieval; a Flutter Web client provides upload, live pipeline progress, a VS Code–style explorer, and streaming Q&A.
+**Code Weave helps you understand a software project without reading every file yourself.**
+
+Upload a ZIP of a project (for example, a GitHub repo you downloaded). The app reads the code and documentation, builds a map of how files, classes, and functions fit together, and remembers the important pieces in a searchable index. You can click through that map like a file explorer, see how parts connect, and **ask questions in normal language** — “What does this function do?”, “How is authentication handled?”, “Where is the database configured?” — and get answers grounded in _your_ codebase, with links back to the relevant files.
+
+Think of it as a **smart tour guide for a codebase**: it does not replace reading code for critical changes, but it dramatically speeds up onboarding, exploration, and “where is X implemented?” questions.
+
+### For developers
+
+Code Weave is a full-stack **code intelligence** demo: multi-language parsing (Tree-sitter), structural graphs, dual chunking strategies for RAG, local embeddings, FAISS vector search, and Groq-grounded chat with citations. A **Python / FastAPI** backend owns ingestion and retrieval; a **Flutter Web** client provides upload, live pipeline progress, a collapsible project tree, an architecture graph, and streaming Q&A.
 
 ![System architecture: Flutter Web UI, FastAPI API, detached worker, PostgreSQL, FAISS, local embeddings, and Groq](images/architecture-overview.png)
 
 ---
 
-## What this project demonstrates
+## Table of contents
 
-| Area | What you can evaluate |
-|------|------------------------|
-| **Code understanding** | Multi-language AST parsing (Tree-sitter), function/class extraction, static call-graph edges |
-| **Context ingestion** | README, requirements, YAML/TOML, Docker, and other config/docs indexed alongside code for richer RAG answers |
-| **RAG pipeline** | Custom chunking (AST + text), local embeddings, FAISS retrieval, prompt assembly, Groq streaming — **no LangChain / LlamaIndex / managed vector DB** |
-| **Systems design** | Detached ingestion worker, disk-backed job state, SSE progress, per-repo FAISS indexes |
-| **Full-stack UX** | ZIP upload → live pipeline → explorer tree + architecture graph → chat with citations, history, and graph highlights |
+- [What this project demonstrates](#what-this-project-demonstrates)
+- [End-to-end flow](#end-to-end-flow)
+- [Indexing & RAG pipeline](#indexing--rag-pipeline)
+- [Chunking strategies](#chunking-strategies)
+- [Query-time RAG (chat)](#query-time-rag-chat)
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Project structure](#project-structure)
+- [HTTP API](#http-api-summary)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Run](#run)
+- [Tests](#tests)
+- [Known limitations](#known-limitations)
+- [Platform support](#platform-support)
+- [License](#license)
 
 ---
 
-## RAG built from scratch
+## What this project demonstrates
 
-The retrieval stack is implemented in-house rather than delegated to a framework:
+| Area                   | What you can evaluate                                                                                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Code understanding** | Multi-language AST parsing (Tree-sitter), function/class extraction, static call-graph edges                                                                                  |
+| **Context ingestion**  | README, requirements, YAML/TOML, Docker, plain text, and unsupported-syntax files (`.css`, `.html`, etc.) indexed alongside code                                              |
+| **RAG pipeline**       | Dual chunking (AST semantic + text structural/sliding), local embeddings, FAISS retrieval, custom prompts, Groq streaming — **no LangChain / LlamaIndex / managed vector DB** |
+| **Systems design**     | Detached ingestion worker, disk-backed job state, SSE progress, per-repo FAISS indexes with in-memory cache, job resume on API restart                                        |
+| **Full-stack UX**      | ZIP upload → live pipeline → collapsible tree + architecture graph → chat with citations, history, and graph highlights                                                       |
 
-| Component | Implementation |
-|-----------|----------------|
-| **Chunking (code)** | One chunk per extracted function/method via Tree-sitter; embedding text = `file + function name + description (if any) + source` |
-| **Chunking (docs/config)** | Text-based sections for README (`.md`), requirements (`requirements.txt`, `Pipfile`), YAML/TOML, Dockerfiles, and `docker-compose*.yml` (`application/ingestion/process_context.py`); embedding text uses `section:` instead of `function:` |
-| **Embeddings** | `sentence-transformers` via a thin wrapper (`infrastructure/embeddings/local_embedder.py`); default model `BAAI/bge-small-en-v1.5` (384-dim) |
-| **Vector store** | Per-repository **FAISS** `IndexFlatIP` with L2-normalized vectors (`infrastructure/vector/faiss_store.py`) |
-| **Metadata** | Chunk rows + `embedding_index` in **PostgreSQL** for lookup after FAISS search |
-| **Retrieval** | Query embed → FAISS top-k → hydrate chunks from DB (`application/retrieval/retrieve_chunks.py`) |
-| **Generation** | Structured system/user prompts from retrieved context (`application/retrieval/prompt.py`) → **Groq** chat API (streaming SSE) → post-processed for clean, sectioned answers (`application/retrieval/format_answer.py`) |
+---
 
-**Not used:** LangChain, LlamaIndex, Pinecone, Chroma, Weaviate, or any hosted embedding/vector SaaS. The only external AI dependency for answers is Groq; embeddings run entirely on the host.
+## End-to-end flow
 
-![RAG pipeline: embed query, FAISS top-k, hydrate chunks from Postgres, build prompt, Groq streaming](images/rag-pipeline.png)
+![Code Weave end-to-end flow: ZIP upload through indexing to explorer and chat](images/end-to-end-flow.png)
+
+1. **Upload** — You pick a `.zip` on the home screen (up to **200 MB**). Junk like `venv`, `node_modules`, caches, logs, and `.env*` paths is skipped during extraction and pruned afterward.
+2. **Pipeline** — A background worker runs staged ingestion; the UI shows progress (extract → scan → parse → graph → embed → FAISS → done) and navigates to the explorer when finished.
+3. **Explore** — Use the **project tree** (expand/collapse subtrees) and the **architecture graph** (same expand state) to browse repository → folder → file → class → function. Select a node to see **What it does**, source code, and call relationships.
+4. **Chat** — Ask questions scoped to that repository. The app embeds your question, finds similar chunks in FAISS, loads full text from PostgreSQL, builds a prompt, and streams an answer from Groq with **citations** and optional **graph highlights**.
+
+---
+
+## Indexing & RAG pipeline
+
+Code Weave implements retrieval-augmented generation **from scratch** — no LangChain, LlamaIndex, Pinecone, Chroma, or hosted embedding APIs. The only external AI service for answers is **Groq**; embeddings run **locally** on your machine.
+
+### Ingestion stages
+
+| Stage                  | What happens                                                                                                                                                                            | Main modules                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **ZIP extract**        | Unzip to `backend/data/uploads/`; skip `__MACOSX`, `venv`, `node_modules`, `.git`, caches, logs, `.env*` during read; **prune** leftover junk; enforce **≤ 10,000 files** after cleanup | `zip_extract.py`                      |
+| **File scan**          | Walk the tree; classify each file as `code`, `context`, or `text`                                                                                                                       | `source_filter.py`                    |
+| **Parse / read**       | Tree-sitter for code; structure-aware or sliding text chunking for docs                                                                                                                 | `process_code.py`, `text_chunking.py` |
+| **Graph persist**      | Write files, classes, functions, chunks, call edges to PostgreSQL                                                                                                                       | `persist.py`, `call_extraction.py`    |
+| **Embedding**          | Turn each chunk into embedding text (`chunk_text.py`), encode with sentence-transformers                                                                                                | `local_embedder.py`                   |
+| **FAISS write**        | L2-normalize vectors; append to per-repo `IndexFlatIP`; store `embedding_index` on chunk rows                                                                                           | `faiss_store.py`, `faiss_cache.py`    |
+| **Architecture graph** | Build hierarchy + `calls` edges for the explorer                                                                                                                                        | `build_graph.py`                      |
+
+![Ingestion pipeline stages from ZIP extraction through indexing complete](images/ingestion-pipeline.png)
+
+### Chunking strategies
+
+Every chunk stored in PostgreSQL has a `chunk_strategy` column (`chunk_strategy.py`):
+
+| Strategy            | Value             | When it is used                                                                                                                     |
+| ------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **AST semantic**    | `ast_semantic`    | Tree-sitter finds functions, methods, or classes in supported languages — one chunk per logical unit                                |
+| **Text structural** | `text_structural` | Docs/config split on meaningful boundaries (Markdown headings, YAML top-level keys, requirements line groups, Docker `FROM` blocks) |
+| **Text sliding**    | `text_sliding`    | Fallback for plain text or when structural rules do not apply — overlapping character windows (~2000 chars, ~200 overlap)           |
+
+**Code files (`process_code.py` + `ast_chunking.py`):**
+
+- Parse with Tree-sitter; extract functions/methods and classes where the language spec supports it.
+- Deduplicate overlapping chunks (e.g. class body vs. methods inside it).
+- If **no** AST chunks are produced, fall back to **text sliding** on the full file source.
+- Unsupported extensions (e.g. `.css`, `.html`) are classified as `text` and indexed with an **`indexing_notice`** in the UI.
+
+**Documentation & config (`text_chunking.py`):**
+
+- `context` kind: README, `requirements.txt`, `pyproject.toml`, Dockerfiles, compose YAML, etc.
+- `text` kind: `.txt`, `.ini`, `.cfg`, and unsupported-syntax web assets.
+- Chunk type for embeddings is usually `document`; embedding text is built as `file: …`, `section: …`, optional `description: …`, then the chunk body.
+
+**Embedding input format (`chunk_to_embedding_text`):**
+
+```
+file: src/auth/jwt.py
+function: decode_token
+description: Validates JWT and returns claims
+
+<source code of the chunk>
+```
+
+This structure helps the bi-encoder match natural-language questions to the right symbols.
+
+### Descriptions (“What it does”)
+
+At ingest time, `description_extract.py` pulls docstrings and leading comments. Heuristics improve thin text (e.g. dataclasses, JWT helpers, rate-limit “bucket” functions). If the result is still generic (“This function buckets.”), `summarize_description.py` may call Groq once to rewrite it. Descriptions are shown in the explorer **Details** panel — not a separate “module” or parse-tree section.
+
+### Embeddings & vector store
+
+| Setting    | Default                                    | Notes                                                         |
+| ---------- | ------------------------------------------ | ------------------------------------------------------------- |
+| Model      | `BAAI/bge-small-en-v1.5`                   | Set via `LOCAL_EMBEDDING_MODEL` in `backend/.env`             |
+| Dimension  | 384                                        | `EMBEDDING_DIMENSION` must match the model                    |
+| Index type | FAISS `IndexFlatIP`                        | Vectors L2-normalized; inner product ≈ cosine similarity      |
+| Storage    | `backend/data/faiss/{repository_id}.index` | One index per repository; in-memory cache in `faiss_cache.py` |
+| Metadata   | PostgreSQL `chunks` table                  | `embedding_index` maps FAISS row → chunk row for hydration    |
 
 ![Data stores: PostgreSQL metadata and per-repo FAISS indexes on disk](images/data-stores.png)
 
 ---
 
+## Query-time RAG (chat)
+
+When you send a chat message:
+
+1. **Embed the query** — Same local model as ingestion (`retrieve_chunks.py`).
+2. **FAISS search** — Top-k similar chunk vectors for that repository (default `top_k: 5`).
+3. **Hydrate** — Load full chunk text, file path, function name, and scores from PostgreSQL (`lookup.py`).
+4. **Prompt** — `prompt.py` builds system + user messages with retrieved context; **beginner mode** uses a tutor-style template and higher temperature.
+5. **Generate** — Groq chat API (`groq_client.py`); SSE streams `meta` (citations, highlight node IDs) → `token` → `answer`.
+6. **Format** — `format_answer.py` cleans decorative quoting and sections the reply (Summary, How it works, etc.).
+7. **Persist** — User and assistant messages saved per repository (`chat/messages.py`).
+
+Orchestration lives in `application/retrieval/rag_service.py`.
+
+![RAG pipeline: embed query, FAISS top-k, hydrate chunks from Postgres, build prompt, Groq streaming](images/rag-pipeline.png)
+
+**Not used:** LangChain, LlamaIndex, Pinecone, Chroma, Weaviate, or any hosted embedding/vector SaaS.
+
+---
+
 ## Features
 
-- **ZIP upload** — Upload a repository archive; size limit configurable (`MAX_UPLOAD_BYTES`, default 100 MB).
-- **Live ingestion pipeline** — Staged progress (extract → scan → parse/read → embed → graph) streamed over SSE; UI auto-navigates to explorer on success.
-- **Detached worker** — Ingestion runs in a subprocess so API hot-reload does not kill long jobs; progress persisted to `backend/data/jobs/{job_id}.json`.
-- **Multi-language parsing** — Tree-sitter with per-language query specs (Python, TypeScript/JavaScript, Java, Go, Rust, C/C++, and more).
-- **Documentation & config indexing** — README, requirements, YAML/TOML, Docker, and compose files are chunked and embedded for retrieval (lock files, `.env*`, and vendor dirs remain excluded).
-- **Architecture graph** — Nodes: repository → folders → files → classes → functions/methods. Edges: `contains` (hierarchy) + `calls` (static call graph).
-- **Explorer UI** — Project tree, left-to-right architecture canvas, syntax-highlighted node details with **What it does** descriptions, RAG chat panel.
-- **RAG chat** — Repository-scoped Q&A with structured answers (Summary, How it works, Relevant chunks), streaming tokens, chunk citations (file, function/section, score), and optional graph node highlights.
-- **Chat history** — Messages persisted per repository in PostgreSQL; explorer reloads prior Q&A when you reopen a repo.
-- **Beginner mode** — Toggle in the chat panel for tutor-style explanations: simpler language, numbered steps, higher LLM temperature, and a distinct prompt format (Summary / Steps / Key idea).
-- **Node descriptions** — Docstrings and file/class comments extracted at ingest time and stored in PostgreSQL (`description` on files, classes, functions); shown in the node details panel.
-- **Repository management** — List, inspect, delete indexed repos (DB + FAISS + upload artifacts).
-
-![Ingestion pipeline stages from ZIP extraction through indexing complete](images/ingestion-pipeline.png)
+- **ZIP upload** — Up to **200 MB** (`MAX_UPLOAD_BYTES` in `backend/.env`). Skips/prunes `venv`, `node_modules`, caches, logs, `.env*`, and similar paths; **10,000-file cap** applies after cleanup.
+- **Live ingestion pipeline** — SSE progress with a top bar and overlay; stages reflect real work, not decorative steps.
+- **Detached worker** — Ingestion in a subprocess so API `--reload` does not kill long jobs; job state in `backend/data/jobs/{job_id}.json` with file locking on Unix (`job_file_lock.py`).
+- **Job recovery** — Retry failed jobs when the ZIP still exists; recoverable jobs resume on API startup.
+- **Multi-language parsing** — Tree-sitter specs for Python, TypeScript/JavaScript, Java, Go, Rust, C/C++, and more (`language_specs.py`).
+- **Three ingest file kinds** — `code` (Tree-sitter), `context` (README, requirements, YAML/TOML, Docker), `text` (plain text + `.css` / `.html` with UI notice).
+- **Architecture graph** — Repository → folders → files → classes → functions/methods; `contains` + static `calls` edges; **collapsible subtrees** in both tree and graph views.
+- **Explorer UI** — Collapsible project tree, left-to-right architecture canvas, syntax-highlighted source, **What it does** descriptions, indexing notices for text-only files, RAG chat with citations.
+- **Progress feedback** — Top progress bar and overlays for upload, delete, repository load, node detail fetch, pipeline, and job retry.
+- **RAG chat** — Repository-scoped Q&A, streaming tokens, chunk citations (file, symbol, score), graph highlights, persisted history.
+- **Beginner mode** — Simpler language and numbered steps in the chat panel.
+- **Repository management** — List, open, delete (DB + FAISS cache + upload artifacts).
 
 ![Explorer UI: project tree, architecture graph, node details, and RAG chat](images/explore-ui-mock.png)
 
@@ -67,17 +177,17 @@ The retrieval stack is implemented in-house rather than delegated to a framework
 
 ## Tech stack
 
-| Layer | Technologies |
-|-------|----------------|
-| **API** | FastAPI, Uvicorn, Pydantic, python-multipart |
-| **Database** | PostgreSQL, SQLAlchemy 2 |
-| **Parsing** | Tree-sitter, tree-sitter-languages |
-| **Embeddings** | sentence-transformers (local CPU) |
-| **Vector search** | FAISS (faiss-cpu), per-repo flat index |
-| **LLM** | Groq API (default: `llama-3.3-70b-versatile`) |
-| **Frontend** | Flutter Web, Provider, Dio, go_router |
-| **Highlighting** | flutter_highlight |
-| **Tests** | pytest (backend), flutter_test (frontend) |
+| Layer             | Technologies                                       |
+| ----------------- | -------------------------------------------------- |
+| **API**           | FastAPI, Uvicorn, Pydantic, python-multipart       |
+| **Database**      | PostgreSQL, SQLAlchemy 2                           |
+| **Parsing**       | Tree-sitter, tree-sitter-languages                 |
+| **Embeddings**    | sentence-transformers (local CPU)                  |
+| **Vector search** | FAISS (faiss-cpu), per-repo flat index             |
+| **LLM**           | Groq API (default: `llama-3.3-70b-versatile`)      |
+| **Frontend**      | Flutter Web, Provider, Dio, go_router, file_picker |
+| **Highlighting**  | flutter_highlight                                  |
+| **Tests**         | pytest (backend), flutter_test (frontend)          |
 
 ![Tech stack: Flutter Web, FastAPI, PostgreSQL, Tree-sitter, sentence-transformers, FAISS, Groq](images/tech-stack.png)
 
@@ -87,76 +197,42 @@ The retrieval stack is implemented in-house rather than delegated to a framework
 
 ```
 code_weave/
-├── README.md                          # This file
-├── images/                            # Diagrams for this README
+├── README.md
+├── LICENSE
+├── images/                            # README diagrams + branding
+│   ├── app-logo.png                   # Master logo (wide; includes padding)
+│   ├── app-logo-tight.png             # Trimmed wordmark for README / docs
+│   └── app-logo-icon.png              # Square mark for favicon / app bar
 ├── scripts/
-│   ├── setup.sh                       # macOS/Linux bootstrap
-│   └── setup.ps1                      # Windows bootstrap
+│   ├── setup.sh                       # macOS / Linux bootstrap
+│   └── setup.ps1                      # Windows bootstrap (best-effort)
 │
 ├── backend/
-│   ├── app/                           # HTTP layer
-│   │   ├── server.py                  # FastAPI app · lifespan · CORS
-│   │   ├── main.py                    # CLI entry (legacy index helpers)
-│   │   └── api/
-│   │       ├── deps.py
-│   │       ├── routes/                # upload · jobs · repos · graph · chat
-│   │       └── schemas/
-│   │
-│   ├── application/                   # Domain logic
-│   │   ├── ingestion/
-│   │   │   ├── zip_extract.py         # Safe ZIP extraction
-│   │   │   ├── source_filter.py       # Code vs context file classification
-│   │   │   ├── process_code.py        # Tree-sitter · functions · calls
-│   │   │   ├── process_context.py     # Text chunking for docs/config
-│   │   │   ├── description_extract.py # Docstrings · comments → description
-│   │   │   ├── chunk_text.py          # Chunk → embedding string
-│   │   │   ├── index_folder.py        # Orchestrate parse → persist → FAISS
-│   │   │   ├── persist.py             # SQLAlchemy batch writes
-│   │   │   ├── pipeline_runner.py     # Staged job orchestration
-│   │   │   ├── job_launcher.py        # Detached subprocess spawn
-│   │   │   └── worker.py              # Worker entrypoint
-│   │   ├── chat/
-│   │   │   └── messages.py            # Persist · list chat history
-│   │   ├── retrieval/
-│   │   │   ├── retrieve_chunks.py     # Embed · FAISS · DB hydrate
-│   │   │   ├── prompt.py              # RAG message builder · beginner mode
-│   │   │   ├── format_answer.py       # Strip decorative quotes · tidy output
-│   │   │   └── query_repository.py    # Sync RAG helper
-│   │   ├── graph/
-│   │   │   ├── build_graph.py         # Hierarchy + call edges
-│   │   │   └── node_detail.py         # Source · description · calls for a node
-│   │   └── repos/
-│   │       ├── processing_tracker.py  # Job state · disk JSON
-│   │       └── repository_service.py
-│   │
-│   ├── infrastructure/                # Adapters
-│   │   ├── db/                        # Models · session · bootstrap
-│   │   ├── parser/                    # tree_sitter_parser · language_specs
-│   │   ├── embeddings/                # local_embedder · config
-│   │   ├── vector/                    # FaissStore · per-repo paths
-│   │   └── llm/                       # groq_client
-│   │
-│   ├── tests/                         # pytest
+│   ├── app/
+│   │   ├── server.py                  # FastAPI app · lifespan · CORS · job resume
+│   │   └── api/routes/                # upload · jobs · repos · graph · chat · languages
+│   ├── application/
+│   │   ├── ingestion/                 # ZIP · filter · AST/text chunk · persist · FAISS path
+│   │   ├── retrieval/                 # retrieve_chunks · prompt · rag_service · format_answer
+│   │   ├── graph/                     # build_graph · node_detail
+│   │   ├── chat/                      # Message persistence
+│   │   └── repos/                     # Jobs · repository delete · file locks
+│   ├── infrastructure/                # db · parser · embeddings · vector · llm · file I/O
+│   ├── tests/
 │   ├── data/                          # gitignored: uploads · jobs · FAISS
+│   ├── ARCHITECTURE.md                # Shorter backend map for contributors
 │   ├── .env.example
 │   └── requirements.txt
 │
 └── frontend/
+    ├── assets/images/                 # app_logo.png · app_logo_icon.png (trimmed for UI)
+    ├── web/                           # favicon · PWA manifest · icons
     └── lib/
-        ├── main.dart
-        ├── core/
-        │   ├── config/api_config.dart
-        │   ├── network/               # Dio client · SSE parser
-        │   ├── router/app_router.dart # / · /pipeline/:id · /explorer/:id
-        │   ├── theme/
-        │   └── layout/
+        ├── core/brand/ · widgets/     # AppLogo · progress overlays
         └── features/
-            ├── home/                  # Repo grid · ZIP picker
-            ├── pipeline/              # Ingestion progress (SSE)
-            └── explorer/              # Tree · graph canvas · details · chat
-                └── presentation/widgets/
-                    ├── rag_chat_panel.dart
-                    └── structured_chat_text.dart  # Sectioned chat rendering
+            ├── home/                  # Repo grid · ZIP upload
+            ├── pipeline/              # Ingestion SSE progress
+            └── explorer/              # Tree · graph · details · chat
 ```
 
 **Gitignored runtime paths:** `backend/.env`, `backend/data/`, `backend/logs/`, `backend/venv/`, `frontend/build/`.
@@ -165,25 +241,25 @@ code_weave/
 
 ## HTTP API (summary)
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/health` | Liveness |
-| `GET` | `/api/repositories` | List indexed repositories |
-| `GET` | `/api/repositories/{id}` | Repository metadata |
-| `DELETE` | `/api/repositories/{id}` | Delete repo + FAISS + uploads |
-| `POST` | `/api/repositories/upload` | Upload ZIP, start ingestion job |
-| `GET` | `/api/jobs/{id}` | Job snapshot |
-| `GET` | `/api/jobs/{id}/events` | SSE progress stream |
-| `POST` | `/api/jobs/{id}/retry` | Retry failed job (if ZIP still on disk) |
-| `GET` | `/api/languages/supported` | Supported Tree-sitter languages |
-| `GET` | `/api/repositories/{id}/hierarchy` | Explorer tree nodes |
-| `GET` | `/api/repositories/{id}/graph` | Architecture nodes + edges |
-| `GET` | `/api/nodes/{node_id}` | Node detail (code, description, calls, metadata) |
-| `GET` | `/api/repositories/{id}/chat/messages` | Chat history for a repository |
-| `POST` | `/api/repositories/{id}/chat` | Streaming RAG (SSE: `meta` → `token` → `answer` → `done`) |
-| `POST` | `/api/repositories/{id}/chat/sync` | Non-streaming RAG |
+| Method   | Path                                   | Purpose                                                   |
+| -------- | -------------------------------------- | --------------------------------------------------------- |
+| `GET`    | `/api/health`                          | Liveness                                                  |
+| `GET`    | `/api/repositories`                    | List indexed repositories                                 |
+| `GET`    | `/api/repositories/{id}`               | Repository metadata                                       |
+| `DELETE` | `/api/repositories/{id}`               | Delete repo + FAISS + uploads                             |
+| `POST`   | `/api/repositories/upload`             | Upload ZIP, start ingestion job                           |
+| `GET`    | `/api/jobs/{id}`                       | Job snapshot                                              |
+| `GET`    | `/api/jobs/{id}/events`                | SSE progress stream                                       |
+| `POST`   | `/api/jobs/{id}/retry`                 | Retry failed job (if ZIP still on disk)                   |
+| `GET`    | `/api/languages/supported`             | Supported Tree-sitter languages                           |
+| `GET`    | `/api/repositories/{id}/hierarchy`     | Explorer tree nodes                                       |
+| `GET`    | `/api/repositories/{id}/graph`         | Architecture nodes + edges                                |
+| `GET`    | `/api/nodes/{node_id}`                 | Node detail (code, description, calls, indexing metadata) |
+| `GET`    | `/api/repositories/{id}/chat/messages` | Chat history                                              |
+| `POST`   | `/api/repositories/{id}/chat`          | Streaming RAG (SSE: `meta` → `token` → `answer` → `done`) |
+| `POST`   | `/api/repositories/{id}/chat/sync`     | Non-streaming RAG                                         |
 
-**Chat request body** (`POST .../chat` and `.../chat/sync`):
+**Chat request body:**
 
 ```json
 {
@@ -193,8 +269,6 @@ code_weave/
 }
 ```
 
-Set `beginner_mode: true` for tutor-style numbered steps and simpler language.
-
 Interactive docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ---
@@ -203,7 +277,7 @@ Interactive docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 - **Python 3.11+**
 - **PostgreSQL** (local or remote)
-- **Flutter SDK** (Web target; Chrome)
+- **Flutter SDK** (Web target; Chrome recommended)
 - **Groq API key** — [console.groq.com](https://console.groq.com)
 
 The first embedding run downloads the Hugging Face model (~tens of MB). Allow a few minutes on a slow connection.
@@ -217,7 +291,7 @@ cd code_weave
 ./scripts/setup.sh
 ```
 
-`setup.sh` creates `backend/venv`, installs Python dependencies, copies `backend/.env.example` → `backend/.env` if missing, bootstraps the database schema, and runs `flutter pub get` when Flutter is on `PATH`.
+`setup.sh` creates `backend/venv`, installs Python dependencies, copies `backend/.env.example` → `backend/.env` if missing, bootstraps the database schema, verifies Tree-sitter, and runs `flutter pub get` when Flutter is on `PATH`.
 
 **Configure `backend/.env`:**
 
@@ -230,9 +304,9 @@ DB_PASSWORD=your_password
 GROQ_API_KEY=your_groq_key
 ```
 
-See `backend/.env.example` for embedding model, CORS, and upload limits.
+See `backend/.env.example` for embedding model, CORS, and `MAX_UPLOAD_BYTES` (default 200 MB).
 
-**Windows:** run `scripts/setup.ps1` from PowerShell.
+**Windows:** run `scripts/setup.ps1` from PowerShell. See [Platform support](#platform-support).
 
 ---
 
@@ -255,14 +329,16 @@ cd frontend
 flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000
 ```
 
+After changing assets (e.g. logo), do a **full restart** of `flutter run`, not only hot reload.
+
 **Suggested demo flow**
 
-1. Open the app → **Upload repository** (include a `README.md` and Python or TypeScript source for best results).  
-2. Watch the **pipeline** until indexing completes (auto-navigates to explorer). The scan stage reports code and context file counts.  
-3. In **Explorer**: browse the tree, open the **Architecture** tab, select a function, view **Details** — declared file, **What it does** (from extracted docstrings), references, and source code.  
-4. In **Chat**, ask about code ("What does X do?") or setup ("How do I install dependencies?"). Toggle **Beginner mode** to compare tutor-style vs developer-style answers. Citations and graph highlights appear in the response; history persists when you return to the repo.
+1. Open the app → **Upload repository** (include a `README.md` and Python or TypeScript source for best results).
+2. Watch the **pipeline** until indexing completes (auto-navigates to explorer).
+3. In **Explorer**: expand/collapse folders in the **project tree** or **architecture graph**; select a function; read **What it does** and source in **Details**.
+4. In **Chat**, ask about code or setup; toggle **Beginner mode** to compare answer styles. Citations and graph highlights appear in the response.
 
-**Note:** Node descriptions and documentation chunks are populated during ingestion. Re-upload or re-ingest a repository to backfill content for repos indexed before these features were added.
+**Re-ingest** repositories that were indexed before newer description or chunking improvements if you want updated metadata.
 
 ---
 
@@ -277,7 +353,29 @@ PYTHONPATH=. pytest -q
 cd frontend && flutter test
 ```
 
-Backend tests cover health/CORS, upload/ZIP extraction, job launcher, processing tracker, progress API, chat API, chat message persistence, RAG prompts, answer formatting, description extraction, context file ingestion, source filtering, path utilities, node detail, and repository deletion.
+Backend tests cover API health/CORS, upload and ZIP extraction (including prune limits), jobs, chat/RAG, chunk strategies, AST and text chunking, descriptions, FAISS, graph APIs, and repository deletion. Frontend tests cover graph layout, visibility helpers, providers, and widgets.
+
+---
+
+## Known limitations
+
+This project is a **local demo / portfolio system**, not production-hardened.
+
+| Limitation | Why |
+| ---------- | --- |
+| **FAISS `IndexFlatIP`** | Exact brute-force search; simple and correct for small indexes. At larger scale, I might consider IVF/HNSW or pgvector. |
+| **Global ingestion lock** | One ingestion job per API host. Multi-machine deployments would need a queue and dedicated workers. |
+| **No auth** | Upload, delete, and chat are open on the API. Production use would need API keys and per-repo access control. |
+| **Static call graph** | Tree-sitter name heuristics, not full type analysis — useful for navigation, not sound program analysis. |
+| **Context chunks + `function_id` FK** | Documentation chunks attach to synthetic function rows; a nullable `function_id` or dedicated section entity would scale better. |
+
+---
+
+## Platform support
+
+**Code Weave was built and tested primarily on macOS.** Linux generally works with the same `setup.sh` flow.
+
+**Windows may break or behave differently** — path handling, detached subprocess ingestion, and job file locking (`fcntl` is Unix-only) are the usual pain points. `scripts/setup.ps1` is provided as a best-effort bootstrap; treat Windows support as experimental and report issues if you need it first-class.
 
 ---
 

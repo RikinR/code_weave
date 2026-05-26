@@ -1,3 +1,8 @@
+/// Pipeline stage model mirroring backend job progress snapshots.
+///
+/// Populated from `GET /api/jobs/{id}` and SSE `/api/jobs/{id}/events` payloads
+/// consumed by [PipelineProvider] on the pipeline screen.
+library;
 class PipelineStage {
   const PipelineStage({
     required this.key,
@@ -13,6 +18,7 @@ class PipelineStage {
   final double progress;
   final List<String> logs;
 
+  /// Parses a stage from a backend job snapshot JSON object.
   factory PipelineStage.fromJson(Map<String, dynamic> json) {
     return PipelineStage(
       key: json['key'] as String,

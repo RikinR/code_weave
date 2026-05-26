@@ -1,12 +1,12 @@
 {
-    "name": "code_weave_frontend",
-    "short_name": "code_weave_frontend",
+    "name": "Code Weave",
+    "short_name": "Code Weave",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0D1117",
+    "theme_color": "#0D1117",
+    "description": "AI powered code intelligence — explore architecture graphs and chat with your codebase.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

@@ -1,3 +1,8 @@
+/// Pipeline screen showing live indexing progress after zip upload.
+///
+/// Route: `/pipeline/:jobId`. Subscribes to [PipelineProvider] SSE events from
+/// `/api/jobs/{id}/events` and auto-navigates to explorer when complete.
+library;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -5,13 +10,19 @@ import 'package:provider/provider.dart';
 import '../../../core/layout/responsive.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/accent_card.dart';
+import '../../../core/widgets/app_logo.dart';
+import '../../../core/widgets/operation_progress.dart';
 import '../domain/pipeline_stage.dart';
 import 'providers/pipeline_provider.dart';
 
+/// Displays ingestion stage progress for a single indexing [jobId].
 class PipelineScreen extends StatefulWidget {
   const PipelineScreen({super.key, required this.jobId, this.repositoryName});
 
+  /// Backend job id returned from upload.
   final String jobId;
+
+  /// Optional display name from upload response or query parameter.
   final String? repositoryName;
 
   @override
@@ -69,13 +80,20 @@ class _PipelineScreenState extends State<PipelineScreen> with SingleTickerProvid
     _maybeNavigateToExplorer(provider);
 
     final isActive = provider.status == 'running' || provider.status == 'pending';
+    final showTopBar = isActive || provider.retrying;
 
     return Scaffold(
       backgroundColor: AppTheme.pageBackdrop,
-      body: SafeArea(
+      body: Stack(
+        children: [
+          SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            TopProgressBar(
+              active: showTopBar,
+              value: provider.overallProgress,
+            ),
             Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: Responsive.horizontalPadding(context),
@@ -88,12 +106,8 @@ class _PipelineScreenState extends State<PipelineScreen> with SingleTickerProvid
                     icon: const Icon(Icons.arrow_back),
                   ),
                   Expanded(
-                    child: Text(
-                      'Indexing ${widget.repositoryName ?? ''}',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                      overflow: TextOverflow.ellipsis,
+                    child: AppBrandTitleRow(
+                      title: 'Indexing ${widget.repositoryName ?? ''}',
                     ),
                   ),
                 ],
@@ -124,6 +138,12 @@ class _PipelineScreenState extends State<PipelineScreen> with SingleTickerProvid
             ),
           ],
         ),
+      ),
+          OperationProgressOverlay(
+            visible: provider.retrying,
+            message: 'Restarting indexing job…',
+          ),
+        ],
       ),
     );
   }
@@ -171,9 +191,9 @@ class _FailedJobBanner extends StatelessWidget {
             children: [
               if (provider.canRetry)
                 FilledButton.icon(
-                  onPressed: () => provider.retry(),
+                  onPressed: provider.retrying ? null : () => provider.retry(),
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Retry indexing'),
+                  label: Text(provider.retrying ? 'Retrying…' : 'Retry indexing'),
                 ),
               OutlinedButton(
                 onPressed: () => context.go('/'),

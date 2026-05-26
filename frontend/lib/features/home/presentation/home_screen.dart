@@ -1,3 +1,9 @@
+/// Home screen: repository list, zip upload, and supported languages.
+///
+/// Entry point after app launch (`/`). Uploads zip archives via
+/// `POST /api/repositories/upload` and navigates to the pipeline screen;
+/// tapping a repository card opens the explorer for that indexed codebase.
+library;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -7,9 +13,12 @@ import '../../../core/layout/responsive.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/accent_card.dart';
+import '../../../core/widgets/app_logo.dart';
+import '../../../core/widgets/operation_progress.dart';
 import '../domain/repository_summary.dart';
 import 'providers/repository_list_provider.dart';
 
+/// Landing screen listing indexed repositories with upload and delete actions.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -67,6 +76,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<RepositoryListProvider>();
     final compact = Responsive.isCompact(context);
+    final showOverlay = _uploading || provider.isBusy;
+    final overlayMessage = _uploading
+        ? 'Uploading and starting index…'
+        : provider.busyMessage;
 
     return Scaffold(
       backgroundColor: AppTheme.pageBackdrop,
@@ -76,10 +89,12 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              TopProgressBar(active: showOverlay),
               _HomeHeader(
                 compact: compact,
                 uploading: _uploading,
-                onRefresh: provider.load,
+                busy: provider.isBusy,
+                onRefresh: provider.isBusy ? null : provider.load,
                 onUpload: () => _uploadZip(context),
               ),
               Expanded(
@@ -119,24 +134,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-          if (_uploading)
-            const ModalBarrier(dismissible: false, color: Colors.black26),
-          if (_uploading)
-            const Center(
-              child: Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Uploading and starting index…'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          OperationProgressOverlay(
+            visible: showOverlay,
+            message: overlayMessage,
+          ),
         ],
       ),
     );
@@ -146,15 +147,17 @@ class _HomeScreenState extends State<HomeScreen> {
 class _HomeHeader extends StatelessWidget {
   const _HomeHeader({
     required this.compact,
-    required this.onRefresh,
     required this.onUpload,
+    this.onRefresh,
     this.uploading = false,
+    this.busy = false,
   });
 
   final bool compact;
-  final VoidCallback onRefresh;
+  final VoidCallback? onRefresh;
   final VoidCallback onUpload;
   final bool uploading;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -166,26 +169,10 @@ class _HomeHeader extends StatelessWidget {
         8,
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(Icons.hub_outlined, color: AppTheme.accent, size: 32),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Code Weave',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                Text(
-                  'Explore & chat with your codebase',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.textMuted),
-                ),
-              ],
-            ),
-          ),
+          HomeBrandHeader(compact: compact),
+          const Spacer(),
           IconButton(
             onPressed: onRefresh,
             icon: const Icon(Icons.refresh),
@@ -251,13 +238,10 @@ class _RepositoryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (provider.loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 48),
-        child: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
-      );
+    if (provider.loading && provider.repositories.isEmpty) {
+      return const SizedBox.shrink();
     }
-    if (provider.error != null) {
+    if (provider.error != null && provider.repositories.isEmpty) {
       return Center(child: Text(provider.error!, style: const TextStyle(color: AppTheme.danger)));
     }
     if (provider.repositories.isEmpty) {
@@ -266,8 +250,8 @@ class _RepositoryGrid extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.folder_open, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.5)),
-            const SizedBox(height: 16),
+            const AppLogo(height: 120),
+            const SizedBox(height: 20),
             Text(
               'No indexed repositories yet',
               style: Theme.of(context).textTheme.titleMedium,
@@ -294,6 +278,7 @@ class _RepositoryGrid extends StatelessWidget {
         final repo = provider.repositories[index];
         return _RepositoryCard(
           repo: repo,
+          deleteEnabled: !provider.isBusy,
           onDelete: () => _confirmDeleteRepository(context, repo),
         );
       },
@@ -302,10 +287,15 @@ class _RepositoryGrid extends StatelessWidget {
 }
 
 class _RepositoryCard extends StatelessWidget {
-  const _RepositoryCard({required this.repo, required this.onDelete});
+  const _RepositoryCard({
+    required this.repo,
+    required this.onDelete,
+    this.deleteEnabled = true,
+  });
 
   final RepositorySummary repo;
   final VoidCallback onDelete;
+  final bool deleteEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -341,7 +331,7 @@ class _RepositoryCard extends StatelessWidget {
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 icon: const Icon(Icons.delete_outline, size: 20, color: AppTheme.danger),
                 tooltip: 'Delete repository',
-                onPressed: onDelete,
+                onPressed: deleteEnabled ? onDelete : null,
               ),
             ],
           ),

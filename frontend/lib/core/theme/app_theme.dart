@@ -1,5 +1,10 @@
+/// Dark GitHub-inspired theme and semantic colors for graph node types.
+///
+/// Shared by home, pipeline, and explorer screens for consistent UI chrome.
+library;
 import 'package:flutter/material.dart';
 
+/// Application color palette and [ThemeData] factory.
 class AppTheme {
   static const Color bg = Color(0xFF0D1117);
   static const Color surface = Color(0xFF161B22);
@@ -20,6 +25,7 @@ class AppTheme {
 
   static const Color pageBackdrop = Color(0xFF0D1117);
 
+  /// Returns an accent color for architecture graph and tree node [type]s.
   static Color nodeTypeColor(String type) {
     return switch (type) {
       'repository' => accent,
@@ -32,6 +38,7 @@ class AppTheme {
     };
   }
 
+  /// Builds the default dark Material 3 theme for the app.
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(

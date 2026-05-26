@@ -1,3 +1,9 @@
+/// Provider for live indexing job progress on the pipeline screen.
+///
+/// Holds job id, status, stages, and repository id on completion. Polls
+/// `GET /api/jobs/{id}`, streams `GET /api/jobs/{id}/events` via SSE, and
+/// calls `POST /api/jobs/{id}/retry` when a job was interrupted.
+library;
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -7,16 +13,31 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/network/sse_client.dart';
 import '../../domain/pipeline_stage.dart';
 
+/// ChangeNotifier backing [PipelineScreen] stage list and progress UI.
 class PipelineProvider extends ChangeNotifier {
   PipelineProvider(this._api);
 
   final ApiClient _api;
 
+  /// Active indexing job identifier from upload or route.
   String? jobId;
+
+  /// Display name passed from upload or query parameter.
   String? repositoryName;
+
+  /// Set when indexing completes; used to navigate to explorer.
   String? repositoryId;
+
+  /// Job status: `pending`, `running`, `completed`, or `failed`.
   String status = 'pending';
+
+  /// Error detail when [status] is `failed`.
   String? error;
+
+  /// True while a retry request is in flight.
+  bool retrying = false;
+
+  /// Ordered ingestion stages with progress and logs.
   List<PipelineStage> stages = [];
 
   DateTime? _startedAt;
@@ -26,6 +47,7 @@ class PipelineProvider extends ChangeNotifier {
   Timer? _notifyDebounce;
   int _session = 0;
 
+  /// The stage currently marked `running`, if any.
   PipelineStage? get runningStage {
     for (final stage in stages) {
       if (stage.status == 'running') return stage;
@@ -33,6 +55,7 @@ class PipelineProvider extends ChangeNotifier {
     return null;
   }
 
+  /// Human-readable label for the active or next pipeline stage.
   String get activeStageLabel {
     final running = runningStage;
     if (running != null) return running.label;
@@ -44,12 +67,14 @@ class PipelineProvider extends ChangeNotifier {
     return 'Preparing pipeline';
   }
 
+  /// Most recent log line from the running stage.
   String? get lastLog {
     final running = runningStage;
     if (running == null || running.logs.isEmpty) return null;
     return running.logs.last;
   }
 
+  /// Elapsed time since job start, formatted as `m:ss`.
   String get elapsedLabel {
     if (_startedAt == null) return '0:00';
     final seconds = DateTime.now().difference(_startedAt!).inSeconds;
@@ -58,6 +83,7 @@ class PipelineProvider extends ChangeNotifier {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
+  /// Contextual hint shown under the processing banner.
   String get activityHint {
     if (status == 'failed') {
       return 'Indexing stopped. Retry below or upload again from home.';
@@ -72,12 +98,15 @@ class PipelineProvider extends ChangeNotifier {
     return 'Live updates from the server. Stages advance as parsing and indexing complete.';
   }
 
+  /// True when failure was caused by a backend restart during indexing.
   bool get isInterrupted =>
       status == 'failed' &&
       (error?.toLowerCase().contains('interrupted') ?? false);
 
+  /// Retry is only offered for interrupted jobs.
   bool get canRetry => isInterrupted;
 
+  /// Resets state for a new [id] without starting polling or SSE.
   void prepareForJob(String id, {String? repoName}) {
     _uiTicker?.cancel();
     _pollTimer?.cancel();
@@ -92,6 +121,7 @@ class PipelineProvider extends ChangeNotifier {
     _lastEventAt = null;
   }
 
+  /// Starts polling, SSE, and UI timers for job [id].
   Future<void> start(String id, {String? repoName}) async {
     _session++;
     final session = _session;
@@ -212,10 +242,13 @@ class PipelineProvider extends ChangeNotifier {
     return msg;
   }
 
+  /// Retries an interrupted job. Returns true if retry started successfully.
   Future<bool> retry() async {
     if (jobId == null || !canRetry) return false;
     _session++;
     final session = _session;
+    retrying = true;
+    _notify();
     try {
       final data = await _api.retryJob(jobId!);
       if (_session != session) return false;
@@ -241,7 +274,19 @@ class PipelineProvider extends ChangeNotifier {
       error = e.toString();
       _notify();
       return false;
+    } finally {
+      if (_session == session) {
+        retrying = false;
+        _notify();
+      }
     }
+  }
+
+  /// Progress fraction (0–1) from the running stage, if available.
+  double? get overallProgress {
+    final running = runningStage;
+    if (running == null || running.progress <= 0) return null;
+    return running.progress / 100;
   }
 
   void _applySnapshot(Map<String, dynamic> data) {

@@ -1,3 +1,5 @@
+/// Tests folder-based layout math for the architecture graph canvas.
+library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:code_weave_frontend/features/explorer/domain/graph_models.dart';

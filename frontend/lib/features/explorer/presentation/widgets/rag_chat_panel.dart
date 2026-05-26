@@ -1,3 +1,9 @@
+/// RAG chat sidebar for asking questions about the indexed repository.
+///
+/// Shown on the right of the explorer on medium+ layouts and as a tab on
+/// compact layouts. Sends queries through [ExplorerProvider.sendChat] to
+/// the backend streaming chat endpoint with citation chips linking to nodes.
+library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/layout/responsive.dart';
@@ -5,6 +11,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../providers/explorer_provider.dart';
 import 'structured_chat_text.dart';
 
+/// Chat panel with message history, beginner mode toggle, and query input.
 class RagChatPanel extends StatefulWidget {
   const RagChatPanel({
     super.key,

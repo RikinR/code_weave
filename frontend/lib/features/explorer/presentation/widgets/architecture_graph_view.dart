@@ -1,9 +1,15 @@
+/// Architecture graph panel wrapper for the explorer center tab.
+///
+/// Filters hierarchy nodes to architecture types, caps large graphs, and
+/// hosts [ArchitectureGraphCanvas] in the explorer Architecture tab.
+library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../domain/graph_models.dart';
 import 'architecture_graph_canvas.dart';
 
+/// Header plus scrollable folder-tree graph of files, classes, and functions.
 class ArchitectureGraphView extends StatelessWidget {
   const ArchitectureGraphView({
     super.key,
@@ -12,7 +18,10 @@ class ArchitectureGraphView extends StatelessWidget {
     required this.rootId,
     required this.selectedId,
     required this.highlightedIds,
+    required this.expandedNodeIds,
     required this.onSelect,
+    required this.onToggleExpand,
+    this.onCollapseAll,
   });
 
   final List<GraphNodeModel> nodes;
@@ -20,7 +29,10 @@ class ArchitectureGraphView extends StatelessWidget {
   final String? rootId;
   final String? selectedId;
   final Set<String> highlightedIds;
+  final Set<String> expandedNodeIds;
   final ValueChanged<String> onSelect;
+  final ValueChanged<String> onToggleExpand;
+  final VoidCallback? onCollapseAll;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +65,19 @@ class ArchitectureGraphView extends StatelessWidget {
                     ),
               ),
               const Spacer(),
+              if (onCollapseAll != null)
+                TextButton(
+                  onPressed: onCollapseAll,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'Collapse all',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                  ),
+                ),
               Text(
                 capped
                     ? '${graphNodes.length} of ${displayNodes.length} nodes'
@@ -66,7 +91,8 @@ class ArchitectureGraphView extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: Text(
-              'Graph capped at $kMaxArchitectureGraphNodes nodes — use the project tree for full navigation.',
+              'Graph capped at $kMaxArchitectureGraphNodes nodes — use the project tree for full navigation. '
+              'Click the chevron on a node to collapse or expand its subtree.',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
             ),
           ),
@@ -74,10 +100,13 @@ class ArchitectureGraphView extends StatelessWidget {
         Expanded(
           child: ArchitectureGraphCanvas(
             nodes: graphNodes,
+            allNodes: graphNodes,
             rootId: rootId!,
             selectedId: selectedId,
             highlightedIds: highlightedIds,
+            expandedNodeIds: expandedNodeIds,
             onSelect: onSelect,
+            onToggleExpand: onToggleExpand,
           ),
         ),
       ],

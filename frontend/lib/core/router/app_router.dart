@@ -1,3 +1,8 @@
+/// Application routing configuration using go_router.
+///
+/// Maps URL paths to the home, pipeline, and explorer feature screens that
+/// consume backend job and repository identifiers from query parameters.
+library;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -5,6 +10,7 @@ import '../../features/explorer/presentation/explorer_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/pipeline/presentation/pipeline_screen.dart';
 
+/// Creates the app router with routes for home, indexing pipeline, and explorer.
 GoRouter createRouter() {
   return GoRouter(
     initialLocation: '/',

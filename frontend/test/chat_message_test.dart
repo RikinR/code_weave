@@ -1,3 +1,5 @@
+/// Tests chat message parsing on the explorer provider.
+library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:code_weave_frontend/features/explorer/presentation/providers/explorer_provider.dart';

@@ -1,24 +1,42 @@
+/// Scrollable canvas that paints the folder-tree architecture graph.
+///
+/// Lays out visible hierarchy nodes with [FolderGraphLayout], draws
+/// parent-child edges, and renders interactive node chips in the explorer
+/// Architecture tab. Selection syncs with the project tree and details panel.
+library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../domain/graph_models.dart';
+import '../../domain/graph_tree_visibility.dart';
 import 'folder_graph_layout.dart';
 
+/// Interactive graph canvas with pan/zoom scroll and node selection.
 class ArchitectureGraphCanvas extends StatefulWidget {
   const ArchitectureGraphCanvas({
     super.key,
     required this.nodes,
+    required this.allNodes,
     required this.rootId,
     required this.selectedId,
     required this.highlightedIds,
+    required this.expandedNodeIds,
     required this.onSelect,
+    required this.onToggleExpand,
   });
 
+  /// Nodes currently eligible for layout (may be capped).
   final List<GraphNodeModel> nodes;
+
+  /// Full node set used to detect children for expand chevrons.
+  final List<GraphNodeModel> allNodes;
+
   final String rootId;
   final String? selectedId;
   final Set<String> highlightedIds;
+  final Set<String> expandedNodeIds;
   final ValueChanged<String> onSelect;
+  final ValueChanged<String> onToggleExpand;
 
   @override
   State<ArchitectureGraphCanvas> createState() => _ArchitectureGraphCanvasState();
@@ -37,7 +55,12 @@ class _ArchitectureGraphCanvasState extends State<ArchitectureGraphCanvas> {
 
   @override
   Widget build(BuildContext context) {
-    final layout = FolderGraphLayout.compute(rootId: widget.rootId, nodes: widget.nodes);
+    final visibleNodes = filterVisibleTreeNodes(
+      widget.nodes,
+      widget.rootId,
+      widget.expandedNodeIds,
+    );
+    final layout = FolderGraphLayout.compute(rootId: widget.rootId, nodes: visibleNodes);
     if (layout.positions.isEmpty) {
       return const Center(
         child: Text('No code structure to display', style: TextStyle(color: AppTheme.textMuted)),
@@ -46,9 +69,11 @@ class _ArchitectureGraphCanvasState extends State<ArchitectureGraphCanvas> {
 
     final byId = {for (final n in widget.nodes) n.id: n};
     final containsEdges = <(String, String)>[];
-    for (final n in widget.nodes) {
+    for (final n in visibleNodes) {
       final parent = n.parentId;
-      if (parent != null && layout.positions.containsKey(parent) && layout.positions.containsKey(n.id)) {
+      if (parent != null &&
+          layout.positions.containsKey(parent) &&
+          layout.positions.containsKey(n.id)) {
         containsEdges.add((parent, n.id));
       }
     }
@@ -84,6 +109,8 @@ class _ArchitectureGraphCanvasState extends State<ArchitectureGraphCanvas> {
                   ...layout.positions.entries.map((e) {
                     final node = byId[e.key];
                     if (node == null) return const SizedBox.shrink();
+                    final hasChildren = nodeHasChildren(node.id, widget.allNodes);
+                    final isExpanded = widget.expandedNodeIds.contains(node.id);
                     return Positioned(
                       left: e.value.dx,
                       top: e.value.dy,
@@ -91,7 +118,12 @@ class _ArchitectureGraphCanvasState extends State<ArchitectureGraphCanvas> {
                         node: node,
                         selected: widget.selectedId == node.id,
                         highlighted: widget.highlightedIds.contains(node.id),
+                        hasChildren: hasChildren,
+                        isExpanded: isExpanded,
                         onTap: () => widget.onSelect(node.id),
+                        onToggleExpand: hasChildren
+                            ? () => widget.onToggleExpand(node.id)
+                            : null,
                       ),
                     );
                   }),
@@ -153,13 +185,19 @@ class _GraphNodeChip extends StatelessWidget {
     required this.node,
     required this.selected,
     required this.highlighted,
+    required this.hasChildren,
+    required this.isExpanded,
     required this.onTap,
+    this.onToggleExpand,
   });
 
   final GraphNodeModel node;
   final bool selected;
   final bool highlighted;
+  final bool hasChildren;
+  final bool isExpanded;
   final VoidCallback onTap;
+  final VoidCallback? onToggleExpand;
 
   @override
   Widget build(BuildContext context) {
@@ -178,7 +216,7 @@ class _GraphNodeChip extends StatelessWidget {
         child: Container(
           width: FolderGraphLayout.nodeWidth,
           height: FolderGraphLayout.nodeHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
             color: selected
                 ? color.withValues(alpha: 0.18)
@@ -201,8 +239,25 @@ class _GraphNodeChip extends StatelessWidget {
           ),
           child: Row(
             children: [
+              if (hasChildren)
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(
+                      isExpanded ? Icons.expand_more : Icons.chevron_right,
+                      size: 16,
+                      color: AppTheme.textMuted,
+                    ),
+                    onPressed: onToggleExpand,
+                  ),
+                )
+              else
+                const SizedBox(width: 6),
               Icon(_iconFor(node.type), size: 14, color: color),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   node.name,

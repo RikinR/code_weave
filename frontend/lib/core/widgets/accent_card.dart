@@ -1,7 +1,12 @@
+/// Card container with a colored left accent stripe.
+///
+/// Used on the home repository grid, pipeline stage tiles, and sidebar panels.
+library;
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
+/// Surface card with optional [accentColor] stripe and tap handler.
 class AccentCard extends StatelessWidget {
   const AccentCard({
     super.key,
@@ -17,6 +22,7 @@ class AccentCard extends StatelessWidget {
   final VoidCallback? onTap;
   final EdgeInsets padding;
 
+  /// When true, expands to fill available height in grid layouts.
   final bool fillHeight;
 
   @override

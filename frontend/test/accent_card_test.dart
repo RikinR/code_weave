@@ -1,3 +1,5 @@
+/// Widget smoke test for the shared accent card component.
+library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

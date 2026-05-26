@@ -1,7 +1,13 @@
+/// Structured rendering for RAG assistant responses in the explorer chat panel.
+///
+/// Parses section headers and bullet lists from backend answer text so
+/// [RagChatPanel] can display formatted assistant messages.
+library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
 
+/// Renders plain user text or structured assistant sections and lists.
 class StructuredChatText extends StatelessWidget {
   const StructuredChatText({
     super.key,

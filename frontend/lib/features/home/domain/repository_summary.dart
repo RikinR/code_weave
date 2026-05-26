@@ -1,3 +1,7 @@
+/// Domain model for a repository summary returned by the backend.
+///
+/// Parsed from `GET /api/repositories` and used on the home screen grid.
+library;
 class RepositorySummary {
   const RepositorySummary({
     required this.id,
@@ -19,6 +23,7 @@ class RepositorySummary {
   final int functionCount;
   final int chunkCount;
 
+  /// Builds a summary from a backend repository JSON object.
   factory RepositorySummary.fromJson(Map<String, dynamic> json) {
     return RepositorySummary(
       id: json['id'] as String,

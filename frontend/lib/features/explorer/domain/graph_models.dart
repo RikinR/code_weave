@@ -1,3 +1,11 @@
+/// Graph node and edge models for the explorer hierarchy and architecture view.
+///
+/// Parsed from `GET /api/repositories/{id}/hierarchy` and
+/// `GET /api/repositories/{id}/graph` responses consumed by [ExplorerProvider].
+/// Node types and capping helpers keep the architecture canvas performant.
+
+/// Node types rendered in the architecture graph canvas.
+library;
 const kArchitectureGraphNodeTypes = {
   'repository',
   'folder',
@@ -7,12 +15,15 @@ const kArchitectureGraphNodeTypes = {
   'method',
 };
 
+/// Maximum nodes drawn in the architecture graph before breadth-first capping.
 const kMaxArchitectureGraphNodes = 400;
 
+/// Filters [nodes] to types shown in the architecture graph.
 List<GraphNodeModel> architectureGraphNodes(List<GraphNodeModel> nodes) {
   return nodes.where((n) => kArchitectureGraphNodeTypes.contains(n.type)).toList();
 }
 
+/// Caps visible graph nodes by breadth-first traversal from [rootId].
 List<GraphNodeModel> capArchitectureGraphNodes(
   List<GraphNodeModel> nodes,
   String rootId, {
@@ -41,6 +52,7 @@ List<GraphNodeModel> capArchitectureGraphNodes(
   return nodes.where((n) => kept.contains(n.id)).toList();
 }
 
+/// A node in the repository hierarchy (folder, file, class, function, etc.).
 class GraphNodeModel {
   const GraphNodeModel({
     required this.id,
@@ -60,6 +72,7 @@ class GraphNodeModel {
   final String? filePath;
   final String? language;
 
+  /// Parses a hierarchy node from backend JSON.
   factory GraphNodeModel.fromJson(Map<String, dynamic> json) {
     return GraphNodeModel(
       id: json['id'] as String,
@@ -73,6 +86,7 @@ class GraphNodeModel {
   }
 }
 
+/// A directed edge in the call graph between two [GraphNodeModel] ids.
 class GraphEdgeModel {
   const GraphEdgeModel({
     required this.id,
@@ -86,6 +100,7 @@ class GraphEdgeModel {
   final String target;
   final String kind;
 
+  /// Parses a graph edge from backend JSON.
   factory GraphEdgeModel.fromJson(Map<String, dynamic> json) {
     return GraphEdgeModel(
       id: json['id'] as String,

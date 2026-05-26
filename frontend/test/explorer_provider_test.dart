@@ -1,3 +1,5 @@
+/// Tests for [ExplorerProvider] graph selection, node detail, and chat state.
+library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:code_weave_frontend/core/network/api_client.dart';

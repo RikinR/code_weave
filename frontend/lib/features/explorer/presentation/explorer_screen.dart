@@ -1,3 +1,8 @@
+/// Explorer screen: project tree, architecture graph, details, and RAG chat.
+///
+/// Route: `/explorer/:repositoryId`. Loads hierarchy and graph from the backend
+/// via [ExplorerProvider] and composes tree, graph, detail, and chat panels.
+library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
@@ -7,16 +12,22 @@ import 'package:provider/provider.dart';
 
 import '../../../core/layout/responsive.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_logo.dart';
+import '../../../core/widgets/operation_progress.dart';
 import '../domain/graph_models.dart';
 import 'providers/explorer_provider.dart';
 import 'widgets/architecture_graph_view.dart';
 import 'widgets/explorer_tree.dart';
 import 'widgets/rag_chat_panel.dart';
 
+/// Main explorer layout for browsing and querying an indexed repository.
 class ExplorerScreen extends StatefulWidget {
   const ExplorerScreen({super.key, required this.repositoryId, this.repositoryName});
 
+  /// Backend repository id from the route.
   final String repositoryId;
+
+  /// Optional display name from query parameter.
   final String? repositoryName;
 
   @override
@@ -63,19 +74,44 @@ class _ExplorerScreenState extends State<ExplorerScreen> with TickerProviderStat
     final explorer = context.watch<ExplorerProvider>();
     final compact = Responsive.isCompact(context);
 
-    if (explorer.loading) {
-      return const Scaffold(
-        backgroundColor: AppTheme.pageBackdrop,
-        body: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
-      );
-    }
-
-    return _ExplorerLoadedBody(
-      explorer: explorer,
-      compact: compact,
-      centerTabIndex: explorer.centerTabIndex,
-      mobileTabController: compact ? _mobileTabs() : null,
-      onOpenTree: compact ? (ctx, exp) => _openTreeDrawer(ctx, exp) : null,
+    return Scaffold(
+      backgroundColor: AppTheme.pageBackdrop,
+      body: Stack(
+        children: [
+          if (explorer.loading)
+            const SafeArea(
+              child: Column(
+                children: [
+                  TopProgressBar(active: true),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        'Loading repository…',
+                        style: TextStyle(color: AppTheme.textMuted),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            _ExplorerLoadedBody(
+              explorer: explorer,
+              compact: compact,
+              centerTabIndex: explorer.centerTabIndex,
+              mobileTabController: compact ? _mobileTabs() : null,
+              onOpenTree: compact ? (ctx, exp) => _openTreeDrawer(ctx, exp) : null,
+            ),
+          OperationProgressOverlay(
+            visible: explorer.loading,
+            message: 'Loading repository graph and chat history…',
+          ),
+          OperationProgressOverlay(
+            visible: explorer.detailLoading && !explorer.loading,
+            message: 'Loading node details…',
+          ),
+        ],
+      ),
     );
   }
 
@@ -94,10 +130,13 @@ class _ExplorerScreenState extends State<ExplorerScreen> with TickerProviderStat
           rootId: explorer.rootId,
           nodes: explorer.nodes,
           selectedId: explorer.selectedNodeId,
+          expandedNodeIds: explorer.expandedNodeIds,
           onSelect: (id) {
             explorer.selectNode(id);
             Navigator.pop(sheetContext);
           },
+          onToggleExpand: explorer.toggleNodeExpanded,
+          onCollapseAll: explorer.collapseAllTreeNodes,
           scrollController: scrollController,
         ),
       ),
@@ -126,7 +165,10 @@ class _ExplorerLoadedBody extends StatelessWidget {
       rootId: explorer.rootId,
       nodes: explorer.nodes,
       selectedId: explorer.selectedNodeId,
+      expandedNodeIds: explorer.expandedNodeIds,
       onSelect: explorer.selectNode,
+      onToggleExpand: explorer.toggleNodeExpanded,
+      onCollapseAll: explorer.collapseAllTreeNodes,
     );
 
     final graphPanel = Selector<ExplorerProvider, _GraphPanelModel>(
@@ -136,6 +178,7 @@ class _ExplorerLoadedBody extends StatelessWidget {
           rootId: p.rootId,
           selectedId: p.selectedNodeId,
           highlightedIds: p.highlightedNodeIds,
+          expandedNodeIds: p.expandedNodeIds,
         ),
         builder: (context, model, _) => ArchitectureGraphView(
           nodes: model.nodes,
@@ -143,7 +186,10 @@ class _ExplorerLoadedBody extends StatelessWidget {
           rootId: model.rootId,
           selectedId: model.selectedId,
           highlightedIds: model.highlightedIds,
+          expandedNodeIds: model.expandedNodeIds,
           onSelect: explorer.selectNode,
+          onToggleExpand: explorer.toggleNodeExpanded,
+          onCollapseAll: explorer.collapseAllTreeNodes,
         ),
     );
 
@@ -267,11 +313,7 @@ class _ExplorerAppBar extends StatelessWidget {
             ),
           ],
           Expanded(
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: AppBrandTitleRow(title: title, logoSize: compact ? 32 : 36),
           ),
         ],
       ),
@@ -479,6 +521,23 @@ class _NodeDetailsPanel extends StatelessWidget {
           detail!['file_path']?.toString() ?? '',
           style: const TextStyle(color: AppTheme.accent, fontFamily: 'monospace', fontSize: 13),
         ),
+        if (detail!['indexing_notice'] != null &&
+            detail!['indexing_notice'].toString().trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+            ),
+            child: Text(
+              detail!['indexing_notice'].toString(),
+              style: const TextStyle(fontSize: 13, height: 1.4, color: AppTheme.textPrimary),
+            ),
+          ),
+        ],
         if (detail!['start_line'] != null)
           Text(
             'Lines ${detail!['start_line']}–${detail!['end_line']}',
@@ -542,6 +601,11 @@ class _NodeDetailsPanel extends StatelessWidget {
       'php': 'php',
       'kotlin': 'kotlin',
       'swift': 'swift',
+      'css': 'css',
+      'html': 'xml',
+      'htm': 'xml',
+      'scss': 'scss',
+      'sass': 'scss',
     };
     return map[lang] ?? 'plaintext';
   }
@@ -554,6 +618,7 @@ class _GraphPanelModel {
     required this.rootId,
     required this.selectedId,
     required this.highlightedIds,
+    required this.expandedNodeIds,
   });
 
   final List<GraphNodeModel> nodes;
@@ -561,6 +626,7 @@ class _GraphPanelModel {
   final String? rootId;
   final String? selectedId;
   final Set<String> highlightedIds;
+  final Set<String> expandedNodeIds;
 
   @override
   bool operator ==(Object other) {
@@ -569,11 +635,13 @@ class _GraphPanelModel {
         identical(edges, other.edges) &&
         rootId == other.rootId &&
         selectedId == other.selectedId &&
-        setEquals(highlightedIds, other.highlightedIds);
+        setEquals(highlightedIds, other.highlightedIds) &&
+        setEquals(expandedNodeIds, other.expandedNodeIds);
   }
 
   @override
-  int get hashCode => Object.hash(nodes, edges, rootId, selectedId, highlightedIds);
+  int get hashCode =>
+      Object.hash(nodes, edges, rootId, selectedId, highlightedIds, expandedNodeIds);
 }
 
 class _ChatPanelModel {

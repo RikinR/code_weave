@@ -1,15 +1,26 @@
+/// Hierarchical project tree for the explorer left sidebar.
+///
+/// Renders repository folder/file/class/function nodes from backend hierarchy
+/// data. On compact layouts it appears in a bottom sheet; on medium+ layouts
+/// it sits beside the architecture graph and details tabs.
+library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../domain/graph_models.dart';
+import '../../domain/graph_tree_visibility.dart';
 
+/// Expandable tree listing all visible hierarchy nodes under [rootId].
 class ExplorerTree extends StatefulWidget {
   const ExplorerTree({
     super.key,
     required this.rootId,
     required this.nodes,
     required this.selectedId,
+    required this.expandedNodeIds,
     required this.onSelect,
+    required this.onToggleExpand,
+    this.onCollapseAll,
     this.scrollController,
     this.showHeader = true,
   });
@@ -17,8 +28,13 @@ class ExplorerTree extends StatefulWidget {
   final String? rootId;
   final List<GraphNodeModel> nodes;
   final String? selectedId;
+  final Set<String> expandedNodeIds;
   final ValueChanged<String> onSelect;
+  final ValueChanged<String> onToggleExpand;
+  final VoidCallback? onCollapseAll;
   final ScrollController? scrollController;
+
+  /// When false, hides the "Project tree" header row.
   final bool showHeader;
 
   @override
@@ -26,7 +42,6 @@ class ExplorerTree extends StatefulWidget {
 }
 
 class _ExplorerTreeState extends State<ExplorerTree> {
-  final Set<String> expanded = {};
   late Map<String, GraphNodeModel> _nodesById;
 
   @override
@@ -62,12 +77,31 @@ class _ExplorerTreeState extends State<ExplorerTree> {
           if (widget.showHeader)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-              child: Text(
-                'Project tree',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textMuted,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Project tree',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textMuted,
+                          ),
                     ),
+                  ),
+                  if (widget.onCollapseAll != null)
+                    TextButton(
+                      onPressed: widget.onCollapseAll,
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Collapse all',
+                        style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                      ),
+                    ),
+                ],
               ),
             ),
           _buildNode(widget.rootId!, 0),
@@ -80,8 +114,15 @@ class _ExplorerTreeState extends State<ExplorerTree> {
     final node = _nodesById[id];
     if (node == null) return const SizedBox.shrink();
 
-    final children = widget.nodes.where((n) => n.parentId == id).toList();
-    final isExpanded = expanded.contains(id);
+    final rootId = widget.rootId!;
+    if (!isTreeNodeVisible(id, rootId, _nodesById, widget.expandedNodeIds)) {
+      return const SizedBox.shrink();
+    }
+
+    final children = widget.nodes.where((n) => n.parentId == id).toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final hasChildren = children.isNotEmpty;
+    final isExpanded = widget.expandedNodeIds.contains(id);
     final selected = widget.selectedId == id;
     final typeColor = AppTheme.nodeTypeColor(node.type);
 
@@ -101,7 +142,7 @@ class _ExplorerTreeState extends State<ExplorerTree> {
                   : null,
               child: Row(
                 children: [
-                  if (children.isNotEmpty)
+                  if (hasChildren)
                     SizedBox(
                       width: 24,
                       height: 24,
@@ -113,15 +154,7 @@ class _ExplorerTreeState extends State<ExplorerTree> {
                           size: 18,
                           color: AppTheme.textMuted,
                         ),
-                        onPressed: () {
-                          setState(() {
-                            if (isExpanded) {
-                              expanded.remove(id);
-                            } else {
-                              expanded.add(id);
-                            }
-                          });
-                        },
+                        onPressed: () => widget.onToggleExpand(id),
                       ),
                     )
                   else
@@ -144,7 +177,8 @@ class _ExplorerTreeState extends State<ExplorerTree> {
             ),
           ),
         ),
-        if (isExpanded) ...children.map((c) => _buildNode(c.id, depth + 1)),
+        if (isExpanded)
+          ...children.map((c) => _buildNode(c.id, depth + 1)),
       ],
     );
   }

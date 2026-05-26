@@ -1,3 +1,8 @@
+/// Server-Sent Events (SSE) client for streaming backend responses.
+///
+/// Used by [PipelineProvider] for live indexing progress and by
+/// [ExplorerProvider] for token-streamed RAG chat answers.
+library;
 import 'dart:async';
 import 'dart:convert';
 
@@ -5,8 +10,13 @@ import 'package:dio/dio.dart';
 
 import '../config/api_config.dart';
 
+/// Callback invoked for each parsed SSE event block.
 typedef SseHandler = void Function(String event, Map<String, dynamic> data);
 
+/// Opens an SSE stream to [path] and dispatches parsed events to [onEvent].
+///
+/// Supports GET and POST with optional JSON [body]. Used for
+/// `/api/jobs/{id}/events` and `/api/repositories/{id}/chat`.
 Future<void> listenSse(
   String path, {
   required SseHandler onEvent,

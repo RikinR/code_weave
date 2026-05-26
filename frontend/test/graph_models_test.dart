@@ -1,3 +1,5 @@
+/// Tests JSON deserialization for architecture graph nodes and edges.
+library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:code_weave_frontend/features/explorer/domain/graph_models.dart';

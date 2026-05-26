@@ -1,3 +1,5 @@
+/// Smoke tests for shared domain models used by the pipeline UI.
+library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:code_weave_frontend/features/pipeline/domain/pipeline_stage.dart';

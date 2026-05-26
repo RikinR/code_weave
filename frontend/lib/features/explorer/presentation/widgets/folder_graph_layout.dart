@@ -1,9 +1,15 @@
+/// Left-to-right tree layout algorithm for architecture graph nodes.
+///
+/// Computes pixel positions for hierarchy nodes rendered by
+/// [ArchitectureGraphCanvas] in the explorer Architecture tab.
+library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../domain/graph_models.dart';
 
+/// Layout result with node positions, canvas size, and depth levels.
 class FolderGraphLayout {
   FolderGraphLayout({
     required this.positions,
@@ -21,6 +27,7 @@ class FolderGraphLayout {
   static const double siblingGap = 14;
   static const double padding = 24;
 
+  /// Computes a folder-tree layout rooted at [rootId] from flat [nodes].
   static FolderGraphLayout compute({
     required String rootId,
     required List<GraphNodeModel> nodes,
